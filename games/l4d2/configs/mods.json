@@ -1,0 +1,10 @@
+{
+  "GameFolder": "left4dead2",
+  "MetaMod": {
+    "DownloadPage": "https://www.metamodsource.net/downloads.php?branch=stable"
+  },
+  "SourceMod": {
+    "DownloadPage": "https://www.sourcemod.net/downloads.php?branch=stable",
+    "PluginFile": "addons/sourcemod/bin/sourcemod.2.l4d2"
+  }
+}

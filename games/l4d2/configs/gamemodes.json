@@ -1,0 +1,32 @@
+[
+  {
+    "id": "coop",
+    "name": "Campaign (Coop)",
+    "description": "Team up with friends against AI hordes"
+  },
+  {
+    "id": "versus",
+    "name": "Versus",
+    "description": "Players vs Players - humans play infected"
+  },
+  {
+    "id": "realism",
+    "name": "Realism",
+    "description": "Campaign with hardcore difficulty and no HUD"
+  },
+  {
+    "id": "realismversus",
+    "name": "Realism Versus",
+    "description": "Versus mode with realism settings"
+  },
+  {
+    "id": "survival",
+    "name": "Survival",
+    "description": "Survive infinite waves of infected"
+  },
+  {
+    "id": "scavenge",
+    "name": "Scavenge",
+    "description": "Collect gas cans before the time runs out"
+  }
+]

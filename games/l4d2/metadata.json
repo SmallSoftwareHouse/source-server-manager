@@ -1,0 +1,9 @@
+﻿{
+  "GameName": "Left 4 Dead 2",
+  "ShortName": "l4d2",
+  "SteamAppId": 222860,
+  "Executable": "srcds.exe",
+  "GameFolder": "left4dead2",
+  "DefaultGamePort": 27015,
+  "DefaultClientPort": 27005
+}

@@ -1,0 +1,34 @@
+# Server installations (can be hundreds of GB)
+servers/
+
+# SteamCMD download cache
+downloads/
+
+# Runtime state files
+**/.running
+**/players.json
+**/.mods_installed.json
+
+# Runtime logs
+logs/
+
+# Local server registry (contains machine-specific paths)
+config/servers_registry.json
+
+# Internal development files (not for public repo)
+CAPITOLATO.md
+CLAUDE.md
+SESSIONE.md
+TODO.md
+migrate_server_structure.ps1
+
+# Notepad++ backups
+nppBackup/
+
+# Claude Code internal data
+.claude/
+
+# Windows
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/

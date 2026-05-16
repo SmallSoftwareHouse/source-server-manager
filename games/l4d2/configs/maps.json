@@ -1,0 +1,282 @@
+[
+  {
+    "id": "c1m1_hotel",
+    "name": "Dead Center - Hotel",
+    "campaign": "Dead Center"
+  },
+  {
+    "id": "c1m2_streets",
+    "name": "Dead Center - Streets",
+    "campaign": "Dead Center"
+  },
+  {
+    "id": "c1m3_mall",
+    "name": "Dead Center - Mall",
+    "campaign": "Dead Center"
+  },
+  {
+    "id": "c1m4_atrium",
+    "name": "Dead Center - Atrium",
+    "campaign": "Dead Center"
+  },
+  {
+    "id": "c2m1_highway",
+    "name": "Dark Carnival - Highway",
+    "campaign": "Dark Carnival"
+  },
+  {
+    "id": "c2m2_fairgrounds",
+    "name": "Dark Carnival - Fairgrounds",
+    "campaign": "Dark Carnival"
+  },
+  {
+    "id": "c2m3_coaster",
+    "name": "Dark Carnival - Coaster",
+    "campaign": "Dark Carnival"
+  },
+  {
+    "id": "c2m4_barns",
+    "name": "Dark Carnival - Barns",
+    "campaign": "Dark Carnival"
+  },
+  {
+    "id": "c2m5_concert",
+    "name": "Dark Carnival - Concert",
+    "campaign": "Dark Carnival"
+  },
+  {
+    "id": "c3m1_plankcountry",
+    "name": "Swamp Fever - Plank Country",
+    "campaign": "Swamp Fever"
+  },
+  {
+    "id": "c3m2_swamp",
+    "name": "Swamp Fever - Swamp",
+    "campaign": "Swamp Fever"
+  },
+  {
+    "id": "c3m3_shantytown",
+    "name": "Swamp Fever - Shanty Town",
+    "campaign": "Swamp Fever"
+  },
+  {
+    "id": "c3m4_plantation",
+    "name": "Swamp Fever - Plantation",
+    "campaign": "Swamp Fever"
+  },
+  {
+    "id": "c4m1_milltown_a",
+    "name": "Hard Rain - Mill Town A",
+    "campaign": "Hard Rain"
+  },
+  {
+    "id": "c4m2_sugarmill_a",
+    "name": "Hard Rain - Sugar Mill A",
+    "campaign": "Hard Rain"
+  },
+  {
+    "id": "c4m3_sugarmill_b",
+    "name": "Hard Rain - Sugar Mill B",
+    "campaign": "Hard Rain"
+  },
+  {
+    "id": "c4m4_milltown_b",
+    "name": "Hard Rain - Mill Town B",
+    "campaign": "Hard Rain"
+  },
+  {
+    "id": "c4m5_milltown_escape",
+    "name": "Hard Rain - Escape",
+    "campaign": "Hard Rain"
+  },
+  {
+    "id": "c5m1_waterfront_sndscape",
+    "name": "The Parish - Waterfront (Soundscape)",
+    "campaign": "The Parish"
+  },
+  {
+    "id": "c5m1_waterfront",
+    "name": "The Parish - Waterfront",
+    "campaign": "The Parish"
+  },
+  {
+    "id": "c5m2_park",
+    "name": "The Parish - Park",
+    "campaign": "The Parish"
+  },
+  {
+    "id": "c5m3_cemetery",
+    "name": "The Parish - Cemetery",
+    "campaign": "The Parish"
+  },
+  {
+    "id": "c5m4_quarter",
+    "name": "The Parish - Quarter",
+    "campaign": "The Parish"
+  },
+  {
+    "id": "c5m5_bridge",
+    "name": "The Parish - Bridge",
+    "campaign": "The Parish"
+  },
+  {
+    "id": "c6m1_riverbank",
+    "name": "The Passing - Riverbank",
+    "campaign": "The Passing"
+  },
+  {
+    "id": "c6m2_bedlam",
+    "name": "The Passing - Bedlam",
+    "campaign": "The Passing"
+  },
+  {
+    "id": "c6m3_port",
+    "name": "The Passing - Port",
+    "campaign": "The Passing"
+  },
+  {
+    "id": "c7m1_docks",
+    "name": "The Sacrifice - Docks",
+    "campaign": "The Sacrifice"
+  },
+  {
+    "id": "c7m2_barge",
+    "name": "The Sacrifice - Barge",
+    "campaign": "The Sacrifice"
+  },
+  {
+    "id": "c7m3_port",
+    "name": "The Sacrifice - Port",
+    "campaign": "The Sacrifice"
+  },
+  {
+    "id": "c8m1_apartment",
+    "name": "No Mercy - Apartment",
+    "campaign": "No Mercy"
+  },
+  {
+    "id": "c8m2_subway",
+    "name": "No Mercy - Subway",
+    "campaign": "No Mercy"
+  },
+  {
+    "id": "c8m3_sewers",
+    "name": "No Mercy - Sewers",
+    "campaign": "No Mercy"
+  },
+  {
+    "id": "c8m4_interior",
+    "name": "No Mercy - Interior",
+    "campaign": "No Mercy"
+  },
+  {
+    "id": "c8m5_rooftop",
+    "name": "No Mercy - Rooftop",
+    "campaign": "No Mercy"
+  },
+  {
+    "id": "c9m1_alleys",
+    "name": "Crash Course - Alleys",
+    "campaign": "Crash Course"
+  },
+  {
+    "id": "c9m2_lots",
+    "name": "Crash Course - Lots",
+    "campaign": "Crash Course"
+  },
+  {
+    "id": "c10m1_caves",
+    "name": "Death Toll - Caves",
+    "campaign": "Death Toll"
+  },
+  {
+    "id": "c10m2_drainage",
+    "name": "Death Toll - Drainage",
+    "campaign": "Death Toll"
+  },
+  {
+    "id": "c10m3_ranchhouse",
+    "name": "Death Toll - Ranch House",
+    "campaign": "Death Toll"
+  },
+  {
+    "id": "c10m4_mainstreet",
+    "name": "Death Toll - Main Street",
+    "campaign": "Death Toll"
+  },
+  {
+    "id": "c10m5_houseboat",
+    "name": "Death Toll - House Boat",
+    "campaign": "Death Toll"
+  },
+  {
+    "id": "c11m1_greenhouse",
+    "name": "Dead Air - Greenhouse",
+    "campaign": "Dead Air"
+  },
+  {
+    "id": "c11m2_offices",
+    "name": "Dead Air - Offices",
+    "campaign": "Dead Air"
+  },
+  {
+    "id": "c11m3_garage",
+    "name": "Dead Air - Garage",
+    "campaign": "Dead Air"
+  },
+  {
+    "id": "c11m4_terminal",
+    "name": "Dead Air - Terminal",
+    "campaign": "Dead Air"
+  },
+  {
+    "id": "c11m5_runway",
+    "name": "Dead Air - Runway",
+    "campaign": "Dead Air"
+  },
+  {
+    "id": "c12m1_hilltop",
+    "name": "Blood Harvest - Hilltop",
+    "campaign": "Blood Harvest"
+  },
+  {
+    "id": "c12m2_traintunnel",
+    "name": "Blood Harvest - Train Tunnel",
+    "campaign": "Blood Harvest"
+  },
+  {
+    "id": "c12m3_bridge",
+    "name": "Blood Harvest - Bridge",
+    "campaign": "Blood Harvest"
+  },
+  {
+    "id": "c12m4_barn",
+    "name": "Blood Harvest - Barn",
+    "campaign": "Blood Harvest"
+  },
+  {
+    "id": "c12m5_cornfield",
+    "name": "Blood Harvest - Cornfield",
+    "campaign": "Blood Harvest"
+  },
+  {
+    "id": "c13m1_alpinecreek",
+    "name": "Cold Stream - Alpine Creek",
+    "campaign": "Cold Stream"
+  },
+  {
+    "id": "c13m2_southpinestream",
+    "name": "Cold Stream - South Pine Stream",
+    "campaign": "Cold Stream"
+  },
+  {
+    "id": "c13m3_memorialbridge",
+    "name": "Cold Stream - Memorial Bridge",
+    "campaign": "Cold Stream"
+  },
+  {
+    "id": "c13m4_cutthroatcreek",
+    "name": "Cold Stream - Cutthroat Creek",
+    "campaign": "Cold Stream"
+  }
+]
