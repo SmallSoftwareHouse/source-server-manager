@@ -1,4 +1,4 @@
-function Send-RconPacket {
+﻿function Send-RconPacket {
     param($stream, $id, $type, $body)
     $bodyBytes = [System.Text.Encoding]::ASCII.GetBytes($body) + [byte]0
     $size = 4 + 4 + $bodyBytes.Length + 1
@@ -71,22 +71,42 @@ function Invoke-RconCommand {
     $tcp = $null
     try {
         $tcp = New-Object System.Net.Sockets.TcpClient
-        $tcp.Connect($Address, $Port)
+        $tcp.ConnectAsync($Address, $Port).Wait($TimeoutMs) | Out-Null
+        if (-not $tcp.Connected) { return $null }
+
         $stream = $tcp.GetStream()
         $stream.ReadTimeout  = $TimeoutMs
         $stream.WriteTimeout = $TimeoutMs
 
         Send-RconPacket $stream 1 3 $Password
-        $r1 = Read-RconPacket $stream
-        $r2 = Read-RconPacket $stream
 
-        $authOk = ($r2 -and $r2.Id -ne -1) -or ($r1 -and $r1.Id -ne -1 -and $r1.Type -eq 2)
+        # Read until we get auth response (type 2) or exhausted attempts
+        $authOk = $false
+        for ($i = 0; $i -lt 3; $i++) {
+            $r = Read-RconPacket $stream
+            if (-not $r) { break }
+            if ($r.Type -eq 2) {
+                $authOk = ($r.Id -ne -1)
+                break
+            }
+        }
         if (-not $authOk) { return $null }
 
         Send-RconPacket $stream 2 2 $Command
-        Start-Sleep -Milliseconds 300
-        $resp = Read-RconPacket $stream
-        if ($resp) { return $resp.Body } else { return "" }
+        Start-Sleep -Milliseconds 500
+
+        $body = ""
+        $stream.ReadTimeout = 1500
+        try {
+            while ($stream.DataAvailable -or $body -eq "") {
+                $resp = Read-RconPacket $stream
+                if (-not $resp) { break }
+                $body += $resp.Body
+                if (-not $stream.DataAvailable) { break }
+            }
+        } catch { }
+
+        return $body
     }
     catch {
         Write-Log "RCON command error: $($_.Exception.Message)" "WARNING"
@@ -108,7 +128,7 @@ function Invoke-ServerRcon {
     try { $cfg = Get-Content $configFile -Raw | ConvertFrom-Json } catch { return $null }
     if ([string]::IsNullOrWhiteSpace($cfg.RconPassword)) { return $null }
 
-    $port = if ($Server.FirewallPort) { [int]$Server.FirewallPort } else { 27015 }
+    $port = if ($Server.FirewallPort) { [int]$Server.FirewallPort } else { 27016 }
 
     $serverPid = 0
     $runningFile = Join-Path $managerPath ".running"
@@ -121,6 +141,8 @@ function Invoke-ServerRcon {
 
     $address = Find-RconAddress -Port $port -ServerPid $serverPid
     if (-not $address) { return $null }
+
+    Write-Log "Invoke-ServerRcon: server=$($Server.Name) address=$address port=$port" "DEBUG"
 
     return Invoke-RconCommand -Address $address -Port $port -Password $cfg.RconPassword -Command $Command
 }

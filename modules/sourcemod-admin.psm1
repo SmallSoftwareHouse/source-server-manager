@@ -1,16 +1,38 @@
-function Update-PlayerList {
+﻿function Update-PlayerList {
     param(
         [string]$ServerPath,
         [string]$GameFolder,
-        [string]$ManagerPath
+        [string]$ManagerPath,
+        [switch]$Silent
     )
 
-    $logsPath    = Join-Path $ServerPath "$GameFolder\addons\sourcemod\logs"
     $playersFile = Join-Path $ManagerPath "players.json"
 
-    if (-not (Test-Path $logsPath)) { return 0 }
-    $logFiles = @(Get-ChildItem $logsPath -Filter "L_*.log" -ErrorAction SilentlyContinue | Sort-Object Name)
+    # Collect log files from both sources
+    $smLogsPath  = Join-Path $ServerPath "$GameFolder\addons\sourcemod\logs"
+    $srcLogsPath = Join-Path $ServerPath "$GameFolder\logs"
+
+    $logFiles = @()
+    if (Test-Path $smLogsPath) {
+        $logFiles += @(Get-ChildItem $smLogsPath -Filter "L_*.log" -ErrorAction SilentlyContinue)
+    }
+    if (Test-Path $srcLogsPath) {
+        # Only session logs (_001, _002, ...) - skip _000 (boot/cvars only)
+        $logFiles += @(Get-ChildItem $srcLogsPath -Filter "*.log" -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '_\d{3}\.log$' -and $_.Name -notmatch '_000\.log$' })
+    }
+
+    $logFiles = @($logFiles | Sort-Object LastWriteTime)
     if ($logFiles.Count -eq 0) { return 0 }
+
+    # Warn user if many files
+    $threshold = 20
+    if (-not $Silent -and $logFiles.Count -gt $threshold) {
+        Write-Host ""
+        Write-Host "  $(Get-Message -Key 'Admin_ScanManyFiles' -MsgArgs @($logFiles.Count))" -ForegroundColor Yellow
+        $confirm = Read-Host (Get-Message -Key "Common_ConfirmPrompt")
+        if ($confirm -ne (Get-Message -Key "ConfirmYes")) { return -1 }
+    }
 
     $players = @{}
     if (Test-Path $playersFile) {
@@ -108,7 +130,9 @@ function Remove-SmAdmin {
 function Show-AdminMenu {
     param(
         [object]$Server,
-        [string]$RootPath
+        [string]$RootPath,
+        [string]$PreselectedSteamId = "",
+        [string]$PreselectedName = ""
     )
 
     $modsConfigPath = Join-Path $RootPath "games\$($Server.Game)\configs\mods.json"
@@ -129,6 +153,39 @@ function Show-AdminMenu {
         return
     }
 
+    # If called from players menu with a preselected player, go directly to add flow
+    if (-not [string]::IsNullOrWhiteSpace($PreselectedSteamId)) {
+        $steamId = $PreselectedSteamId
+        $existingAdmins = @(Get-SmAdmins -ServerPath $gamePath -GameFolder $gameFolder)
+        if ($existingAdmins | Where-Object { $_.SteamId -eq $steamId }) {
+            Write-Host "`n  $(Get-Message -Key 'Admin_AlreadyAdmin' -MsgArgs @($PreselectedName))`n" -ForegroundColor Yellow
+            Read-Host (Get-Message -Key "Common_PressEnter")
+            return
+        }
+        Write-Host ""
+        Write-Host "  $(Get-Message -Key 'Admin_AddAdmin'): $PreselectedName ($PreselectedSteamId)" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  1) $(Get-Message -Key 'Admin_PermRoot')"
+        Write-Host "  2) $(Get-Message -Key 'Admin_PermMod')"
+        Write-Host "  3) $(Get-Message -Key 'Admin_PermCustom')"
+        Write-Host "  0) $(Get-Message -Key 'Common_Cancel')"
+        Write-Host ""
+        $lvl = Read-Host (Get-Message -Key "Admin_PermLevel")
+        $flags = switch ($lvl) { "1" { "z" } "2" { "bcd" } "3" { Read-Host (Get-Message -Key "Admin_EnterFlags") } default { $null } }
+        if ($flags) {
+            Add-SmAdmin -ServerPath $gamePath -GameFolder $gameFolder -SteamId $steamId -Flags $flags | Out-Null
+            Write-Host "`n$(Get-Message -Key 'Admin_Added')" -ForegroundColor Green
+            Start-Sleep -Milliseconds 500
+            $reloadResp = Invoke-ServerRcon -Server $Server -Command "sm_reloadadmins"
+            if ($null -ne $reloadResp) {
+                Write-Host "$(Get-Message -Key 'Admin_ReloadDone')" -ForegroundColor DarkGray
+            }
+            Write-Host ""
+            Read-Host (Get-Message -Key "Common_PressEnter")
+        }
+        return
+    }
+
     while ($true) {
         $admins  = @(Get-SmAdmins -ServerPath $gamePath -GameFolder $gameFolder)
         $players = @(Get-PlayerList -ManagerPath $managerPath)
@@ -143,7 +200,7 @@ function Show-AdminMenu {
             foreach ($a in $admins) {
                 $pName = ($players | Where-Object { $_.SteamId -eq $a.SteamId } | Select-Object -First 1).Name
                 $display = if ($pName) { "$($a.SteamId)  ($pName)" } else { $a.SteamId }
-                Write-Host "  [OK] $display  — [$($a.Flags)]" -ForegroundColor Green
+                Write-Host "  [OK] $display   -  [$($a.Flags)]" -ForegroundColor Green
             }
         }
 
@@ -198,15 +255,25 @@ function Show-AdminMenu {
                     $steamId = $candidates[$pIdx].SteamId
                 }
                 elseif ($src -eq "2") {
+                    $managerCfgPath = Join-Path (Join-Path $Server.Path "manager") "config.json"
+                    $rconCfg = $null
+                    if (Test-Path $managerCfgPath) {
+                        try { $rconCfg = Get-Content $managerCfgPath -Raw | ConvertFrom-Json } catch { }
+                    }
+                    if (-not $rconCfg -or [string]::IsNullOrWhiteSpace($rconCfg.RconPassword)) {
+                        Write-Host "`n$(Get-Message -Key 'Mod_VerifyNoRcon')`n" -ForegroundColor Yellow
+                        Read-Host (Get-Message -Key "Common_PressEnter")
+                        break
+                    }
                     $statusResp = Invoke-ServerRcon -Server $Server -Command "status"
                     if ($null -eq $statusResp) {
-                        Write-Host "`n$(Get-Message -Key 'Mod_VerifyNoRcon')`n" -ForegroundColor Yellow
+                        Write-Host "`n$(Get-Message -Key 'Admin_RconUnreachable')`n" -ForegroundColor Yellow
                         Read-Host (Get-Message -Key "Common_PressEnter")
                         break
                     }
                     $adminIds = $admins | ForEach-Object { $_.SteamId }
                     $connected = @()
-                    $statusRx = [regex]'#\s+\d+\s+"([^"]+)"\s+(STEAM_[0-9]:[0-9]:\d+)'
+                    $statusRx = [regex]'#\s+\d+\s+(?:\d+\s+)?"([^"]+)"\s+(STEAM_[0-9]:[0-9]:\d+)'
                     foreach ($m in $statusRx.Matches($statusResp)) {
                         $sid = $m.Groups[2].Value
                         if ($adminIds -notcontains $sid) {
@@ -269,10 +336,11 @@ function Show-AdminMenu {
                         default { $null }
                     }
                     if ($flags) {
-                        Add-SmAdmin -ServerPath $gamePath -GameFolder $gameFolder -SteamId $steamId -Flags $flags
+                        Add-SmAdmin -ServerPath $gamePath -GameFolder $gameFolder -SteamId $steamId -Flags $flags | Out-Null
                         Write-Host "`n$(Get-Message -Key 'Admin_Added')" -ForegroundColor Green
 
-                        $reloadResp = Invoke-ServerRcon -Server $Server -Command "sm admins rebuild"
+                        Start-Sleep -Milliseconds 500
+                        $reloadResp = Invoke-ServerRcon -Server $Server -Command "sm_reloadadmins"
                         if ($null -ne $reloadResp) {
                             Write-Host "$(Get-Message -Key 'Admin_ReloadDone')" -ForegroundColor DarkGray
                         } else {
@@ -290,7 +358,7 @@ function Show-AdminMenu {
                     $a = $admins[$i]
                     $pName = ($players | Where-Object { $_.SteamId -eq $a.SteamId } | Select-Object -First 1).Name
                     $display = if ($pName) { "$($a.SteamId)  ($pName)" } else { $a.SteamId }
-                    Write-Host "  $($i+1)) $display  — [$($a.Flags)]"
+                    Write-Host "  $($i+1)) $display   -  [$($a.Flags)]"
                 }
                 Write-Host "  0) $(Get-Message -Key 'Common_Cancel')"
                 Write-Host ""
@@ -304,10 +372,11 @@ function Show-AdminMenu {
                 }
                 $confirm = Read-Host (Get-Message -Key "Common_ConfirmPrompt")
                 if ($confirm -eq (Get-Message -Key "ConfirmYes")) {
-                    Remove-SmAdmin -ServerPath $gamePath -GameFolder $gameFolder -SteamId $admins[$rIdx].SteamId
+                    Remove-SmAdmin -ServerPath $gamePath -GameFolder $gameFolder -SteamId $admins[$rIdx].SteamId | Out-Null
                     Write-Host "`n$(Get-Message -Key 'Admin_Removed')" -ForegroundColor Green
 
-                    $reloadResp = Invoke-ServerRcon -Server $Server -Command "sm admins rebuild"
+                    Start-Sleep -Milliseconds 500
+                    $reloadResp = Invoke-ServerRcon -Server $Server -Command "sm_reloadadmins"
                     if ($null -ne $reloadResp) {
                         Write-Host "$(Get-Message -Key 'Admin_ReloadDone')" -ForegroundColor DarkGray
                     } else {
@@ -332,4 +401,4 @@ function Show-AdminMenu {
     }
 }
 
-Export-ModuleMember -Function Update-PlayerList, Get-PlayerList, Show-AdminMenu
+Export-ModuleMember -Function Update-PlayerList, Get-PlayerList, Show-AdminMenu, Get-SmAdmins

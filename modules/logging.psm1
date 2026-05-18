@@ -7,7 +7,6 @@
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $line = "[$timestamp] [$Level] $Message"
 
-    Write-Host $line
     Add-Content -Path ".\logs\manager.log" -Value $line
 }
 

@@ -1,4 +1,4 @@
-function Generate-ServerCfg {
+﻿function Generate-ServerCfg {
     param(
         [string]$ServerId
     )
@@ -184,11 +184,12 @@ function Initialize-ServerConfiguration {
     }
 
     $batchPath = Join-Path (Join-Path $server.Path "manager") "start_server.bat"
+    $serverPort = if ($server.FirewallPort) { [int]$server.FirewallPort } else { 27016 }
     $launchResult = Get-ServerLaunchBatch `
         -InstallPath (Join-Path $server.Path "server") `
         -GameMode $config.GameMode `
         -Map $config.Map `
-        -Port 27015 `
+        -Port $serverPort `
         -OutputPath $batchPath
 
     if (-not $launchResult) {
