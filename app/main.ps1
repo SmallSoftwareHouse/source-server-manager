@@ -1,6 +1,17 @@
 ﻿$RootPath = $PSScriptRoot
 Set-Location $RootPath
 
+# Single-instance lock via named mutex
+$_mutexName = "Global\SourceServerManager_SingleInstance"
+$_mutex = New-Object System.Threading.Mutex($false, $_mutexName)
+if (-not $_mutex.WaitOne(0)) {
+    Write-Host ""
+    Write-Host "  [!!] The tool is already running in another window." -ForegroundColor Red
+    Write-Host "       Close the other instance before opening a new one." -ForegroundColor Yellow
+    Start-Sleep -Seconds 2
+    Stop-Process -Id $PID -Force
+}
+
 $host.ui.RawUI.WindowTitle = "Source Server Manager"
 
 
@@ -87,11 +98,286 @@ function Save-Language {
     $cfg | ConvertTo-Json -Depth 5 | Set-Content $ConfigPath -Encoding UTF8
 }
 
+function Save-DefaultInstallRoot {
+    param([string]$ConfigPath, [string]$Path)
+    $cfg = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+    $cfg.DefaultInstallRoot = $Path
+    $cfg | ConvertTo-Json -Depth 5 | Set-Content $ConfigPath -Encoding UTF8
+}
+
+# -------------------------------------------------------
+# Interactive folder browser helpers
+# -------------------------------------------------------
+
+function Get-DriveFreeGB {
+    param([string]$DriveLetter)
+    try {
+        $wmi = Get-WmiObject Win32_LogicalDisk -Filter "DeviceID='${DriveLetter}:'" -ErrorAction SilentlyContinue
+        if ($wmi) { return [math]::Round($wmi.FreeSpace / 1GB, 1) }
+    } catch { }
+    return -1
+}
+
+function Get-PathFreeGB {
+    param([string]$Path)
+    try {
+        $letter = ($Path -replace '^([A-Za-z]):.*', '$1')
+        return Get-DriveFreeGB -DriveLetter $letter
+    } catch { }
+    return -1
+}
+
+function Write-SpaceIndicator {
+    param([double]$GB)
+    if ($GB -lt 0) { return }
+    if ($GB -lt 10) {
+        Write-Host "  [$(Get-Message -Key 'Browse_Insufficient')  ${GB}GB]" -ForegroundColor Red
+    } elseif ($GB -lt 20) {
+        Write-Host "  [$(Get-Message -Key 'Browse_Warning')  ${GB}GB]" -ForegroundColor Yellow
+    } else {
+        Write-Host "  [$(Get-Message -Key 'Browse_Recommended')  ${GB}GB]" -ForegroundColor Green
+    }
+}
+
+function Get-SpaceColor {
+    param([double]$GB)
+    if ($GB -lt 0)  { return "Gray" }
+    if ($GB -lt 10) { return "Red" }
+    if ($GB -lt 20) { return "Yellow" }
+    return "Green"
+}
+
+function Get-SpaceSuffix {
+    param([double]$GB)
+    if ($GB -lt 0)  { return "" }
+    if ($GB -lt 10) { return "  [$(Get-Message -Key 'Browse_Insufficient')  ${GB}GB]" }
+    if ($GB -lt 20) { return "  [$(Get-Message -Key 'Browse_Warning')  ${GB}GB]" }
+    return "  [$(Get-Message -Key 'Browse_Recommended')  ${GB}GB]"
+}
+
+function Test-IsSystemFolder {
+    param([string]$Path)
+    $blocked = @(
+        $env:SystemRoot,
+        $env:ProgramFiles,
+        ${env:ProgramFiles(x86)},
+        $env:ProgramData,
+        (Split-Path -Parent $env:USERPROFILE)
+    ) | Where-Object { -not [string]::IsNullOrEmpty($_) }
+
+    $extra = @(
+        "$env:SystemDrive\Recovery",
+        "$env:SystemDrive\Boot",
+        "$env:SystemDrive\System Volume Information",
+        "$env:SystemDrive\PerfLogs"
+    )
+
+    $norm = $Path.TrimEnd('\').ToLower()
+    foreach ($root in ($blocked + $extra)) {
+        $r = $root.TrimEnd('\').ToLower()
+        if ($norm -eq $r -or $norm.StartsWith($r + '\')) { return $true }
+    }
+
+    $leaf = (Split-Path -Leaf $Path).ToLower()
+    $sysNames = @('$recycle.bin', 'system volume information', 'recovery', 'boot', 'perflogs', 'msocache')
+    if ($sysNames -contains $leaf) { return $true }
+
+    return $false
+}
+
+function Select-FolderInteractive {
+    # Returns selected absolute path, or $null if cancelled.
+    # Only fixed local NTFS disks (FAT32/cloud drives excluded, server install requires NTFS)
+    $allDrives = @(Get-WmiObject Win32_LogicalDisk -ErrorAction SilentlyContinue |
+        Where-Object { $_.DriveType -eq 3 -and $_.FileSystem -eq 'NTFS' } |
+        Sort-Object DeviceID)
+    $sysDrive = $env:SystemDrive  # e.g. "C:"
+
+    # Single-drive: skip drive selection, start at root
+    $singleDrive = ($allDrives.Count -eq 1)
+    $currentPath = if ($singleDrive) { $allDrives[0].DeviceID + '\' } else { "" }
+
+    while ($true) {
+        Clear-Host
+        Write-Host "=====================================" -ForegroundColor Cyan
+        Write-Host "  $(Get-Message -Key 'Setup_ServerFolderTitle')" -ForegroundColor White
+        Write-Host "=====================================" -ForegroundColor Cyan
+        Write-Host ""
+
+        if ($currentPath -eq "") {
+            # Drive selection screen
+            Write-Host "  --- $(Get-Message -Key 'Browse_SelectDrive') ---" -ForegroundColor Yellow
+            Write-Host ""
+
+            $idx = 1
+            foreach ($drv in $allDrives) {
+                $letter = $drv.DeviceID
+                $freeGB = [math]::Round($drv.FreeSpace / 1GB, 1)
+                $isSystem = ($letter -eq $sysDrive)
+                if ($isSystem) {
+                    $suffix = "  [$(Get-Message -Key 'Browse_SystemDrive')  ${freeGB}GB]"
+                    $color  = "Yellow"
+                } else {
+                    $suffix = Get-SpaceSuffix -GB $freeGB
+                    $color  = Get-SpaceColor -GB $freeGB
+                }
+                Write-Host "  $idx) $letter\" -NoNewline -ForegroundColor White
+                Write-Host $suffix -ForegroundColor $color
+                $idx++
+            }
+            Write-Host ""
+            Write-Host "  0) $(Get-Message -Key 'Browse_Cancel')" -ForegroundColor White
+            Write-Host ""
+
+            $choice = (Read-Host "  >").Trim()
+            if ($choice -eq "0") { return $null }
+            if ($choice -match '^\d+$') {
+                $ci = [int]$choice - 1
+                if ($ci -ge 0 -and $ci -lt $allDrives.Count) {
+                    $freeGB = [math]::Round($allDrives[$ci].FreeSpace / 1GB, 1)
+                    if ($freeGB -ge 0 -and $freeGB -lt 10) {
+                        Write-Host ""
+                        Write-Host "  $(Get-Message -Key 'Browse_InsufficientSpace')" -ForegroundColor Red
+                        Start-Sleep -Seconds 2
+                        continue
+                    }
+                    $currentPath = $allDrives[$ci].DeviceID + '\'
+                }
+            }
+        } else {
+            # Folder navigation screen
+            $freeGB = Get-PathFreeGB -Path $currentPath
+            $suffix = Get-SpaceSuffix -GB $freeGB
+            $color  = Get-SpaceColor -GB $freeGB
+            $isAtDriveRoot = ($currentPath -match '^[A-Za-z]:\\?$')
+
+            # Current path + space
+            Write-Host "  $(Get-Message -Key 'Browse_CurrentPath'):" -ForegroundColor Gray
+            Write-Host "  $currentPath" -ForegroundColor White
+            Write-Host "  $(Get-Message -Key 'Browse_FreeSpace'):" -NoNewline -ForegroundColor DarkGray
+            Write-Host $suffix -ForegroundColor $color
+            Write-Host ""
+
+            # List non-hidden, non-system subfolders
+            $subFolders = @()
+            try {
+                $subFolders = @(Get-ChildItem -Path $currentPath -Directory -ErrorAction SilentlyContinue |
+                    Where-Object {
+                        (-not ($_.Attributes -band [System.IO.FileAttributes]::Hidden)) -and
+                        (-not ($_.Attributes -band [System.IO.FileAttributes]::System)) -and
+                        (-not (Test-IsSystemFolder -Path $_.FullName))
+                    } | Sort-Object Name)
+            } catch { }
+
+            Write-Host "  --- $(Get-Message -Key 'Browse_Subfolders') ---" -ForegroundColor DarkCyan
+            Write-Host ""
+            if ($subFolders.Count -gt 0) {
+                for ($i = 0; $i -lt $subFolders.Count; $i++) {
+                    Write-Host "  $($i + 1)) $($subFolders[$i].Name)"
+                }
+            } else {
+                Write-Host "  $(Get-Message -Key 'Browse_NoSubfolders')" -ForegroundColor DarkGray
+            }
+
+            Write-Host ""
+            Write-Host "  --- $(Get-Message -Key 'Common_Select') ---" -ForegroundColor DarkCyan
+            Write-Host ""
+            Write-Host "  S) $(Get-Message -Key 'Browse_SelectHere')" -ForegroundColor Green
+            Write-Host "  N) $(Get-Message -Key 'Browse_NewFolder')" -ForegroundColor Cyan
+            if (-not ($singleDrive -and $isAtDriveRoot)) {
+                Write-Host "  0) $(Get-Message -Key 'Browse_Back')" -ForegroundColor White
+            }
+            Write-Host ""
+            Write-Host "  $(Get-Message -Key 'Browse_InputHint')" -ForegroundColor DarkGray
+            Write-Host ""
+
+            $choice = (Read-Host "  >").Trim()
+
+            if ($choice -in @("S","s")) {
+                if ($freeGB -ge 0 -and $freeGB -lt 10) {
+                    Write-Host ""
+                    Write-Host "  $(Get-Message -Key 'Browse_InsufficientSpace')" -ForegroundColor Red
+                    Start-Sleep -Seconds 2
+                    continue
+                }
+                if ($freeGB -ge 0 -and $freeGB -lt 20) {
+                    Write-Host ""
+                    $warn = Read-Host "  $(Get-Message -Key 'Browse_ContinueWarning')"
+                    if ($warn -ne (Get-Message -Key "ConfirmYes")) { continue }
+                }
+                return $currentPath.TrimEnd('\')
+            } elseif ($choice -in @("N","n")) {
+                Write-Host ""
+                $newName = (Read-Host "  $(Get-Message -Key 'Browse_NewFolderName')").Trim()
+                if (-not [string]::IsNullOrWhiteSpace($newName) -and $newName -notmatch '[\\/:*?"<>|]') {
+                    $newPath = Join-Path $currentPath $newName
+                    if (-not (Test-Path $newPath)) {
+                        New-Item -ItemType Directory -Path $newPath -Force -ErrorAction SilentlyContinue | Out-Null
+                    }
+                    if (Test-Path $newPath) { $currentPath = $newPath }
+                }
+            } elseif ($choice -eq "0") {
+                if ($singleDrive -and $isAtDriveRoot) {
+                    # Cannot go back
+                } elseif ($isAtDriveRoot) {
+                    $currentPath = ""  # Back to drive list
+                } else {
+                    $parent = Split-Path -Parent $currentPath
+                    if ([string]::IsNullOrEmpty($parent)) { $currentPath = "" } else { $currentPath = $parent }
+                }
+            } elseif ($choice -match '^\d+$') {
+                $ci = [int]$choice - 1
+                if ($ci -ge 0 -and $ci -lt $subFolders.Count) {
+                    $target = $subFolders[$ci].FullName
+                    if (Test-IsSystemFolder -Path $target) {
+                        Write-Host ""
+                        Write-Host "  $(Get-Message -Key 'Browse_SystemFolder')" -ForegroundColor Red
+                        Start-Sleep -Seconds 2
+                    } else {
+                        $currentPath = $target
+                    }
+                }
+            }
+        }
+    }
+}
+
+function Ask-DefaultInstallRoot {
+    param([switch]$AllowCancel)
+
+    Clear-Host
+    Write-Host "=====================================" -ForegroundColor Cyan
+    Write-Host "  L4D2 Dedicated Server Manager" -ForegroundColor White
+    Write-Host "=====================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  *** $(Get-Message -Key 'Setup_ServerFolderTitle') ***" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host (Get-Message -Key "Setup_ServerFolderDesc") -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host (Get-Message -Key "Setup_ServerFolderTip1") -ForegroundColor DarkGray
+    Write-Host (Get-Message -Key "Setup_ServerFolderTip2") -ForegroundColor DarkGray
+    Write-Host (Get-Message -Key "Setup_ServerFolderTip3") -ForegroundColor DarkGray
+    Write-Host ""
+    Read-Host (Get-Message -Key "Common_PressEnter") | Out-Null
+
+    while ($true) {
+        $chosen = Select-FolderInteractive
+        if ($null -eq $chosen) {
+            if ($AllowCancel) { return $null }
+            # First run: cannot cancel
+            continue
+        }
+        return $chosen
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($config.Language)) {
     $chosenLang = Select-Language -LocaleDir "$RootPath\locale"
     Save-Language -ConfigPath "$RootPath\config\default_config.json" -LangCode $chosenLang
     $config.Language = $chosenLang
 }
+
+$configFilePath = "$RootPath\config\default_config.json"
 
 # -------------------------------------------------------
 # Caricamento locale
@@ -108,6 +394,20 @@ Set-Messages $localeData
 Show-Splash
 Read-Host "Premi INVIO per continuare"
 
+# First run: ask for default server folder (skippable)
+$rawConfig = Get-Content $configFilePath -Raw | ConvertFrom-Json
+if ($rawConfig.DefaultInstallRoot -eq "servers") {
+    $chosenRoot = Ask-DefaultInstallRoot -AllowCancel
+    if ($null -ne $chosenRoot) {
+        Save-DefaultInstallRoot -ConfigPath $configFilePath -Path $chosenRoot
+        $config.DefaultInstallRoot = $chosenRoot
+        Write-Host ""
+        Write-Host "  $(Get-Message -Key 'Settings_ServerRootChanged')" -ForegroundColor Green
+        Write-Host "  $chosenRoot" -ForegroundColor White
+        Start-Sleep -Seconds 2
+    }
+}
+
 # -------------------------------------------------------
 # Avvio
 # -------------------------------------------------------
@@ -115,7 +415,40 @@ Read-Host "Premi INVIO per continuare"
 Write-Log "Manager avviato" "INFO"
 Validate-ServerRegistry | Out-Null
 
+# Disk space check on startup
+$_diskCheckGB = Get-PathFreeGB -Path $config.DefaultInstallRoot
+if ($_diskCheckGB -lt 0) {
+    # Cannot determine space — skip silently
+} elseif ($_diskCheckGB -lt 10) {
+    Write-Host (Get-Message -Key "Startup_DiskCheckCrit" -MsgArgs @($_diskCheckGB)) -ForegroundColor Red
+    Start-Sleep -Seconds 2
+} elseif ($_diskCheckGB -lt 20) {
+    Write-Host (Get-Message -Key "Startup_DiskCheckWarn" -MsgArgs @($_diskCheckGB)) -ForegroundColor Yellow
+    Start-Sleep -Milliseconds 1200
+} else {
+    Write-Host (Get-Message -Key "Startup_DiskCheckOk") -ForegroundColor Green
+    Start-Sleep -Milliseconds 600
+}
+
 # --- HELPERS ---
+
+function Get-GamePath {
+    param($server)
+    return Join-Path $server.Path "server"
+}
+
+function Get-ManagerPath {
+    param($server)
+    return Join-Path $server.Path "manager"
+}
+
+function Get-NextAvailablePort {
+    param([int]$BasePort = 27015)
+    $usedPorts = @(Get-ServerRegistry | Where-Object { $_.FirewallPort } | ForEach-Object { [int]$_.FirewallPort })
+    $port = $BasePort
+    while ($usedPorts -contains $port) { $port++ }
+    return $port
+}
 
 function Format-SectionTitle {
     param([string]$Title)
@@ -137,6 +470,38 @@ function Get-ShortPath {
     return $Path
 }
 
+function Show-SettingsSummary {
+    $sep = "====================================="
+
+    $freeGB = Get-PathFreeGB -Path $config.DefaultInstallRoot
+    $spaceSuffix = Get-SpaceSuffix -GB $freeGB
+    $spaceColor  = Get-SpaceColor  -GB $freeGB
+
+    $shortRoot = Get-ShortPath -Path $config.DefaultInstallRoot
+
+    $langDisplay = ""
+    try {
+        $lf = "$RootPath\locale\$($config.Language).json"
+        if (Test-Path $lf) {
+            $ld = Get-Content $lf -Raw | ConvertFrom-Json
+            if ($ld.LanguageName) { $langDisplay = $ld.LanguageName }
+        }
+    } catch { }
+    if ([string]::IsNullOrWhiteSpace($langDisplay)) { $langDisplay = $config.Language }
+
+    Write-Host (Get-Message -Key "Home_SettingsLabel")
+    Write-Host "$(Get-Message -Key 'Home_DefaultFolder') : " -NoNewline -ForegroundColor DarkGray
+    Write-Host "$shortRoot" -NoNewline -ForegroundColor White
+    if ($freeGB -ge 0) {
+        Write-Host $spaceSuffix -ForegroundColor $spaceColor
+    } else {
+        Write-Host ""
+    }
+    Write-Host "$(Get-Message -Key 'Home_Language')         : $langDisplay" -ForegroundColor DarkGray
+    Write-Host $sep
+    Write-Host ""
+}
+
 function Show-ServerSummary {
     $servers = @(Get-ServerRegistry)
     $sep = "====================================="
@@ -154,21 +519,35 @@ function Show-ServerSummary {
 
     for ($i = 0; $i -lt $shown; $i++) {
         $s = $servers[$i]
-        $disk = Get-ServerDiskStatus -Path (Join-Path $s.Path "server")
+        $disk = Get-ServerDiskStatus -Path (Get-GamePath $s)
+
+        $installingFile = Join-Path (Get-ManagerPath $s) ".installing"
+        $isActiveDownload = $false
+        if (($s.Status -eq "Installing") -and (Test-Path $installingFile)) {
+            try {
+                $instData = Get-Content $installingFile -Raw | ConvertFrom-Json
+                $isActiveDownload = $null -ne (Get-Process -Id $instData.InstallerPID -ErrorAction SilentlyContinue)
+            } catch {}
+            if (-not $isActiveDownload) { Remove-Item $installingFile -Force -ErrorAction SilentlyContinue }
+        }
 
         if ($disk -eq "Installed" -and $s.Status -eq "Installed") {
-            $symbol = "[OK]"; $color = "Green"
+            $symbol = "[OK]"; $color = "Green"; $tag = Get-Message -Key "ServerList_StatusOK"
+        } elseif ($isActiveDownload) {
+            $symbol = "[>>]"; $color = "Cyan";  $tag = Get-Message -Key "ServerList_StatusDownloading"
         } elseif ($s.Status -eq "Installing") {
-            $symbol = "[>>]"; $color = "Cyan"
+            $symbol = "[!!]"; $color = "Yellow"; $tag = Get-Message -Key "ServerList_StatusInstalling"
         } elseif ($disk -eq "Missing") {
-            $symbol = "[--]"; $color = "Red"
+            $symbol = "[--]"; $color = "Red";   $tag = Get-Message -Key "ServerList_StatusMissing"
         } else {
-            $symbol = "[!!]"; $color = "Yellow"
+            $symbol = "[!!]"; $color = "Yellow"; $tag = Get-Message -Key "ServerList_StatusError"
         }
 
         $shortPath = Get-ShortPath -Path $s.Path
         $namePad = $s.Name.PadRight(16)
-        Write-Host "  $symbol  $namePad $shortPath" -ForegroundColor $color
+        $line = "  $symbol  $namePad $shortPath"
+        if (-not [string]::IsNullOrEmpty($tag)) { $line += "  $tag" }
+        Write-Host $line -ForegroundColor $color
     }
 
     $hidden = $servers.Count - $shown
@@ -198,8 +577,9 @@ function Show-Menu {
         } else {
             Write-Host "  4) $(Get-Message -Key 'Menu_ResumeInstall')" -ForegroundColor DarkGray
         }
-        Write-Host "  5) $(Get-Message -Key 'Menu_Settings')"
-        Write-Host "  6) $(Get-Message -Key 'Menu_Exit')"
+        Write-Host "  5) $(Get-Message -Key 'Menu_RecoverServer')"
+        Write-Host "  6) $(Get-Message -Key 'Menu_Settings')"
+        Write-Host "  7) $(Get-Message -Key 'Menu_Exit')"
     } else {
         Write-Host "  2) $(Get-Message -Key 'Menu_ManageServer')"
         if ($HasIncomplete) {
@@ -207,8 +587,9 @@ function Show-Menu {
         } else {
             Write-Host "  3) $(Get-Message -Key 'Menu_ResumeInstall')" -ForegroundColor DarkGray
         }
-        Write-Host "  4) $(Get-Message -Key 'Menu_Settings')"
-        Write-Host "  5) $(Get-Message -Key 'Menu_Exit')"
+        Write-Host "  4) $(Get-Message -Key 'Menu_RecoverServer')"
+        Write-Host "  5) $(Get-Message -Key 'Menu_Settings')"
+        Write-Host "  6) $(Get-Message -Key 'Menu_Exit')"
     }
     Write-Host ""
 }
@@ -218,18 +599,12 @@ function Show-Menu {
 function Start-ServerInstall {
     param($target)
 
-    $gamePath    = Join-Path $target.Path "server"
-    $managerPath = Join-Path $target.Path "manager"
+    $gamePath    = Get-GamePath    $target
+    $managerPath = Get-ManagerPath $target
 
-    if (-not (Test-Path $target.Path)) {
-        New-Item -ItemType Directory -Path $target.Path -Force | Out-Null
-    }
-    if (-not (Test-Path $gamePath)) {
-        New-Item -ItemType Directory -Path $gamePath -Force | Out-Null
-    }
-    if (-not (Test-Path $managerPath)) {
-        New-Item -ItemType Directory -Path $managerPath -Force | Out-Null
-    }
+    if (-not (Test-Path $target.Path))    { New-Item -ItemType Directory -Path $target.Path    -Force | Out-Null }
+    if (-not (Test-Path $gamePath))       { New-Item -ItemType Directory -Path $gamePath       -Force | Out-Null }
+    if (-not (Test-Path $managerPath))    { New-Item -ItemType Directory -Path $managerPath    -Force | Out-Null }
 
     $managerConfig = Join-Path $managerPath "config.json"
     if (-not (Test-Path $managerConfig)) {
@@ -237,9 +612,7 @@ function Start-ServerInstall {
     }
 
     $steamDir = Join-Path $RootPath "downloads\steamcmd"
-    if (-not (Test-Path $steamDir)) {
-        New-Item -ItemType Directory -Path $steamDir -Force | Out-Null
-    }
+    if (-not (Test-Path $steamDir)) { New-Item -ItemType Directory -Path $steamDir -Force | Out-Null }
 
     Write-Host "`n$(Get-Message -Key 'Install_Starting' -MsgArgs @($target.Name))`n" -ForegroundColor Cyan
     Write-Host (Get-Message -Key "Install_SteamCmdNote")
@@ -247,19 +620,59 @@ function Start-ServerInstall {
 
     Update-ServerStatus -ServerId $target.ServerId -Status "Installing"
 
-    try {
-        $exe = Install-SteamCMD -Path $steamDir
-        Install-L4D2Server -SteamCmdPath $exe -InstallDir $gamePath -SteamCmdDir $steamDir
-        Update-ServerStatus -ServerId $target.ServerId -Status "Installed"
-        Write-Log "Installazione completata: $($target.Path)" "INFO"
-        Write-Host "`n$(Get-Message -Key 'Install_Done')`n" -ForegroundColor Green
-    }
-    catch {
-        Update-ServerStatus -ServerId $target.ServerId -Status "Error"
-        Write-Log "Errore installazione: $_" "ERROR"
-        Write-Host "`n$(Get-Message -Key 'Install_Failed' -MsgArgs @($_))`n" -ForegroundColor Red
-    }
+    # Build background installer script
+    $registryModule = Join-Path $RootPath "modules\registry.psm1"
+    $steamModule    = Join-Path $RootPath "modules\steamcmd.psm1"
+    $loggingModule  = Join-Path $RootPath "modules\logging.psm1"
+    $messagesModule = Join-Path $RootPath "modules\messages.psm1"
+    $localeFile     = Join-Path $RootPath "locale\$($config.Language).json"
+    $installingFile = Join-Path $managerPath ".installing"
 
+    $bgScript = @"
+`$ErrorActionPreference = 'Stop'
+`$global:RootPath = '$RootPath'
+Import-Module '$registryModule' -Force -WarningAction SilentlyContinue
+Import-Module '$steamModule'    -Force -WarningAction SilentlyContinue
+Import-Module '$loggingModule'  -Force -WarningAction SilentlyContinue
+Import-Module '$messagesModule' -Force -Global -WarningAction SilentlyContinue
+`$localeData = Get-Content '$localeFile' -Raw | ConvertFrom-Json
+Set-Messages `$localeData
+
+`$host.ui.RawUI.WindowTitle = 'Installing: $($target.Name)'
+Write-Host 'Installing: $($target.Name)' -ForegroundColor Cyan
+Write-Host ''
+
+try {
+    `$exe = Install-SteamCMD -Path '$steamDir'
+    Install-L4D2Server -SteamCmdPath `$exe -InstallDir '$gamePath' -SteamCmdDir '$steamDir' -ScriptId '$($target.ServerId)'
+    Update-ServerStatus -ServerId '$($target.ServerId)' -Status 'Installed'
+    Write-Host ''
+    Write-Host 'Installazione completata con successo.' -ForegroundColor Green
+    Write-Log 'Installazione completata: $($target.Path)' 'INFO'
+}
+catch {
+    Update-ServerStatus -ServerId '$($target.ServerId)' -Status 'Error'
+    Write-Log "Errore installazione: `$_" 'ERROR'
+    Write-Host ''
+    Write-Host "[ERRORE] `$_" -ForegroundColor Red
+}
+finally {
+    Remove-Item '$installingFile' -Force -ErrorAction SilentlyContinue
+}
+
+Write-Host ''
+Read-Host 'Premi INVIO per chiudere'
+"@
+
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($bgScript))
+    $proc = Start-Process powershell -ArgumentList "-NoExit -EncodedCommand $encoded" -PassThru
+
+    # Save PID so the menu can monitor the process
+    @{ InstallerPID = $proc.Id; StartedAt = (Get-Date -Format "yyyy-MM-dd HH:mm:ss") } |
+        ConvertTo-Json | Set-Content $installingFile -Encoding UTF8
+
+    Write-Host (Get-Message -Key "Install_Launched") -ForegroundColor Green
+    Write-Host ""
     Read-Host (Get-Message -Key "Common_PressEnter")
 }
 
@@ -286,11 +699,17 @@ function Invoke-CreateServer {
         return
     }
 
-    $defaultPath = Join-Path $config.DefaultInstallRoot $serverName
-    Write-Host (Get-Message -Key "Create_PathDefault" -MsgArgs @($defaultPath))
-    $pathInput = Read-Host (Get-Message -Key "Create_PathPrompt")
+    # Folder selection via interactive browser
+    Write-Host ""
+    Write-Host "  $(Get-Message -Key 'Create_ChooseFolder')" -ForegroundColor Cyan
+    Write-Host ""
+    Read-Host (Get-Message -Key "Common_PressEnter") | Out-Null
 
-    $finalPath = if ([string]::IsNullOrWhiteSpace($pathInput)) { $defaultPath } else { $pathInput.Trim() }
+    $chosenBase = Select-FolderInteractive
+    if ($null -eq $chosenBase) { return }
+
+    # Append server name as subfolder
+    $finalPath = Join-Path $chosenBase $serverName
 
     $pathError = Test-ServerPath -Path $finalPath
     if ($pathError -and $pathError.StartsWith("WARN:")) {
@@ -313,29 +732,64 @@ function Invoke-CreateServer {
     if (-not (Test-Path $gameSubPath))    { New-Item -ItemType Directory -Path $gameSubPath    -Force | Out-Null }
     if (-not (Test-Path $managerSubPath)) { New-Item -ItemType Directory -Path $managerSubPath -Force | Out-Null }
 
+    $assignedPort = Get-NextAvailablePort -BasePort 27016
+
     $server = @{
-        ServerId   = [guid]::NewGuid().ToString()
-        Name       = $serverName
-        Game       = "l4d2"
-        Path       = $finalPath
-        Status     = "Installing"
-        CreatedAt  = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-        LastUpdate = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        ServerId     = [guid]::NewGuid().ToString()
+        Name         = $serverName
+        Game         = "l4d2"
+        Path         = $finalPath
+        Status       = "Installing"
+        FirewallPort = $assignedPort
+        CreatedAt    = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        LastUpdate   = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     }
 
     Add-ServerToRegistry $server
-    Write-Log "Server registrato: $serverName -> $finalPath" "INFO"
+    Write-Log "Server registrato: $serverName -> $finalPath (porta $assignedPort)" "INFO"
 
     Start-ServerInstall $server
 
     $fresh = @(Get-ServerRegistry) | Where-Object { $_.ServerId -eq $server.ServerId } | Select-Object -First 1
-    if ($fresh -and (Get-ServerDiskStatus -Path (Join-Path $fresh.Path "server")) -eq "Installed") {
+    if ($fresh -and (Get-ServerDiskStatus -Path (Get-GamePath $fresh)) -eq "Installed") {
         Write-Host ""
         $runWizard = Read-Host (Get-Message -Key "Wizard_LaunchPrompt")
         if ($runWizard -eq (Get-Message -Key "ConfirmYes")) {
             Invoke-SetupWizard -Server $fresh -RootPath $RootPath | Out-Null
         }
     }
+}
+
+function Find-UnregisteredServers {
+    # Scans DefaultInstallRoot for server folders (managed or flat) not in registry.
+    $basePath = $config.DefaultInstallRoot
+    $registry = @(Get-ServerRegistry)
+
+    # Collect all paths already registered (Path and GamePath)
+    $regPaths = @($registry | ForEach-Object {
+        if ($_.Path)     { $_.Path.TrimEnd('\').ToLower() }
+        if ($_.GamePath) { $_.GamePath.TrimEnd('\').ToLower() }
+    })
+
+    $orphans = @()
+
+    if (-not (Test-Path $basePath)) { return $orphans }
+
+    $subs = @(Get-ChildItem -Path $basePath -Directory -ErrorAction SilentlyContinue |
+        Where-Object {
+            (-not ($_.Attributes -band [System.IO.FileAttributes]::Hidden)) -and
+            (-not ($_.Attributes -band [System.IO.FileAttributes]::System))
+        })
+
+    foreach ($sub in $subs) {
+        $structType = Test-ServerStructure -Path $sub.FullName
+        if ($null -eq $structType) { continue }
+        $normPath = $sub.FullName.TrimEnd('\').ToLower()
+        if ($regPaths -contains $normPath) { continue }
+        $orphans += [PSCustomObject]@{ Path = $sub.FullName; Type = $structType }
+    }
+
+    return $orphans
 }
 
 function Invoke-ListServers {
@@ -351,8 +805,28 @@ function Invoke-ListServers {
     }
     else {
         foreach ($s in $servers) {
-            $disk = Get-ServerDiskStatus -Path (Join-Path $s.Path "server")
-            Write-Host (Get-Message -Key "List_Name"     -MsgArgs @($s.Name))
+            $disk = Get-ServerDiskStatus -Path (Get-GamePath $s)
+            $instFile = Join-Path (Get-ManagerPath $s) ".installing"
+            $activeDl = $false
+            if (($s.Status -eq "Installing") -and (Test-Path $instFile)) {
+                try { $d = Get-Content $instFile -Raw | ConvertFrom-Json; $activeDl = $null -ne (Get-Process -Id $d.InstallerPID -ErrorAction SilentlyContinue) } catch {}
+                if (-not $activeDl) { Remove-Item $instFile -Force -ErrorAction SilentlyContinue }
+            }
+
+            if ($disk -eq "Installed" -and $s.Status -eq "Installed") {
+                $symbol = "[OK]"; $color = "Green"
+            } elseif ($activeDl) {
+                $symbol = "[>>]"; $color = "Cyan"
+            } elseif ($s.Status -eq "Installing") {
+                $symbol = "[!!]"; $color = "Yellow"
+            } elseif ($disk -eq "Missing") {
+                $symbol = "[--]"; $color = "Red"
+            } else {
+                $symbol = "[!!]"; $color = "Yellow"
+            }
+
+            Write-Host "$symbol " -NoNewline -ForegroundColor $color
+            Write-Host (Get-Message -Key "List_Name" -MsgArgs @($s.Name))
             Write-Host (Get-Message -Key "List_Path"     -MsgArgs @($s.Path))
             Write-Host (Get-Message -Key "List_Game"     -MsgArgs @($s.Game))
             Write-Host (Get-Message -Key "List_Registry" -MsgArgs @($s.Status))
@@ -362,7 +836,102 @@ function Invoke-ListServers {
         }
     }
 
-    Read-Host (Get-Message -Key "Common_PressEnter")
+    # --- Scan for unregistered servers in default folder ---
+    $orphans = @(Find-UnregisteredServers)
+
+    Write-Host "====================================="
+    Write-Host (Get-Message -Key "Scan_SectionTitle") -ForegroundColor Yellow
+    Write-Host ""
+
+    if ($orphans.Count -eq 0) {
+        Write-Host (Get-Message -Key "Scan_None") -ForegroundColor DarkGray
+        Write-Host ""
+        Read-Host (Get-Message -Key "Common_PressEnter")
+        return
+    }
+
+    foreach ($o in $orphans) {
+        $folderName = Split-Path -Leaf $o.Path
+        $gamePath   = if ($o.Type -eq "flat") { $o.Path } else { Join-Path $o.Path "server" }
+        $disk       = Get-ServerDiskStatus -Path $gamePath
+        $typeTag    = if ($o.Type -eq "flat") { " [ext]" } else { "" }
+        Write-Host (Get-Message -Key "Scan_Item" -MsgArgs @("$folderName$typeTag", $disk)) -ForegroundColor Yellow
+    }
+    Write-Host ""
+
+    $ans = Read-Host (Get-Message -Key "Scan_RegisterPrompt")
+    if ($ans -ne (Get-Message -Key "ConfirmYes")) {
+        Read-Host (Get-Message -Key "Common_PressEnter")
+        return
+    }
+
+    Write-Host ""
+    Write-Host (Get-Message -Key "Scan_Registering") -ForegroundColor Cyan
+    $count = 0
+    foreach ($o in $orphans) {
+        $folderName  = Split-Path -Leaf $o.Path
+        $isFlat      = ($o.Type -eq "flat")
+        $gamePath    = Join-Path $o.Path "server"
+        $managerPath = Join-Path $o.Path "manager"
+
+        # Skip if name already taken
+        if (Get-ServerByName -Name $folderName) {
+            Write-Host "  [SKIP] $folderName — $(Get-Message -Key 'Recover_NameExists')" -ForegroundColor DarkGray
+            continue
+        }
+
+        # Flat servers: restructure first (move files into server/, create manager/)
+        if ($isFlat) {
+            try {
+                New-Item -ItemType Directory -Path $gamePath    -Force -ErrorAction Stop | Out-Null
+                New-Item -ItemType Directory -Path $managerPath -Force -ErrorAction Stop | Out-Null
+                $items = @(Get-ChildItem -Path $o.Path -ErrorAction Stop |
+                    Where-Object { $_.Name -ne "server" -and $_.Name -ne "manager" })
+                foreach ($item in $items) {
+                    Move-Item -Path $item.FullName -Destination $gamePath -ErrorAction Stop
+                }
+            }
+            catch {
+                Write-Log "Ristrutturazione fallita per $folderName : $_" "ERROR"
+                Write-Host "  [FAIL] $folderName — $(Get-Message -Key 'Recover_RestructureFailed' -MsgArgs @($_))" -ForegroundColor Red
+                # Cleanup empty dirs
+                if ((Test-Path $gamePath)    -and (Get-ChildItem $gamePath).Count    -eq 0) { Remove-Item $gamePath    -Force -ErrorAction SilentlyContinue }
+                if ((Test-Path $managerPath) -and (Get-ChildItem $managerPath).Count -eq 0) { Remove-Item $managerPath -Force -ErrorAction SilentlyContinue }
+                continue
+            }
+        }
+
+        $existingConfig = $null
+        $configFile = Join-Path $managerPath "config.json"
+        if (Test-Path $configFile) {
+            try { $existingConfig = Get-Content $configFile -Raw | ConvertFrom-Json } catch { }
+        }
+
+        $diskStatus = Get-ServerDiskStatus -Path $gamePath
+        $regStatus  = if ($diskStatus -eq "Installed") { "Installed" } else { "Installing" }
+
+        $entry = @{
+            ServerId           = [guid]::NewGuid().ToString()
+            Name               = $folderName
+            Game               = if ($existingConfig -and $existingConfig.Game) { $existingConfig.Game } else { "l4d2" }
+            Path               = $o.Path
+            Status             = $regStatus
+            FirewallPort       = if ($existingConfig -and $existingConfig.FirewallPort) { [int]$existingConfig.FirewallPort } else { Get-NextAvailablePort -BasePort 27016 }
+            ConfiguredMap      = if ($existingConfig -and $existingConfig.ConfiguredMap) { $existingConfig.ConfiguredMap } else { $null }
+            ConfiguredGameMode = if ($existingConfig -and $existingConfig.ConfiguredGameMode) { $existingConfig.ConfiguredGameMode } else { $null }
+            CreatedAt          = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            LastUpdate         = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        }
+
+        Add-ServerToRegistry $entry
+        Write-Log "Server registrato: $folderName -> $($o.Path)" "INFO"
+        Write-Host "  [OK] $folderName" -ForegroundColor Green
+        $count++
+    }
+
+    Write-Host ""
+    Write-Host (Get-Message -Key "Scan_RegisterDone" -MsgArgs @($count)) -ForegroundColor Green
+    Start-Sleep -Seconds 2
 }
 
 function Invoke-ResumeInstallation {
@@ -371,7 +940,7 @@ function Invoke-ResumeInstallation {
     Write-Host ""
 
     $candidates = @(Get-ServerRegistry | Where-Object {
-        $_.Status -ne "Installed" -or (Get-ServerDiskStatus -Path (Join-Path $_.Path "server")) -ne "Installed"
+        $_.Status -ne "Installed" -or (Get-ServerDiskStatus -Path (Get-GamePath $_)) -ne "Installed"
     })
 
     if ($candidates.Count -eq 0) {
@@ -383,7 +952,7 @@ function Invoke-ResumeInstallation {
     if ($candidates.Count -eq 1) {
         $target = $candidates[0]
 		
-        $disk = Get-ServerDiskStatus -Path (Join-Path $target.Path "server")
+        $disk = Get-ServerDiskStatus -Path (Get-GamePath $target)
         Write-Host (Get-Message -Key "Resume_Server" -MsgArgs @($target.Name))
         Write-Host (Get-Message -Key "Resume_Path"   -MsgArgs @($target.Path))
         Write-Host (Get-Message -Key "Resume_Disk"   -MsgArgs @($disk))
@@ -458,15 +1027,54 @@ function Invoke-MoveServer {
 
     Write-Host "`n$(Get-Message -Key 'Move_Title')`n"
     Write-Host (Get-Message -Key "Move_CurrentPath" -MsgArgs @($server.Path))
-    $newPath = Read-Host (Get-Message -Key "Move_NewPathPrompt")
-    if ([string]::IsNullOrWhiteSpace($newPath) -or $newPath.Trim() -eq $server.Path) { return $false }
-    $newPath = $newPath.Trim()
+    Write-Host ""
+
+    # Offer default folder as quick option
+    $defaultBase    = $config.DefaultInstallRoot
+    $defaultDest    = Join-Path $defaultBase $server.Name
+    $defaultFreeGB  = Get-PathFreeGB -Path $defaultBase
+    $defaultSuffix  = Get-SpaceSuffix -GB $defaultFreeGB
+    $defaultColor   = Get-SpaceColor  -GB $defaultFreeGB
+
+    Write-Host "  1) " -NoNewline
+    Write-Host "$defaultDest" -NoNewline -ForegroundColor White
+    Write-Host $defaultSuffix -ForegroundColor $defaultColor
+    Write-Host "  2) $(Get-Message -Key 'Move_ChooseFolder')" -ForegroundColor White
+    Write-Host "  0) $(Get-Message -Key 'Common_Cancel')"
+    Write-Host ""
+
+    $pick = (Read-Host (Get-Message -Key "Common_Select")).Trim()
+
+    $chosenBase = $null
+    switch ($pick) {
+        "1" { $chosenBase = $defaultBase }
+        "2" { $chosenBase = Select-FolderInteractive }
+        "0" { return $false }
+        default { return $false }
+    }
+    if ($null -eq $chosenBase) { return $false }
+
+    # Append server name as subfolder (same rule as Create)
+    $newPath = Join-Path $chosenBase $server.Name
+
+    if ($newPath -eq $server.Path) {
+        Write-Host "`n$(Get-Message -Key 'Move_SamePath')`n" -ForegroundColor Yellow
+        Read-Host (Get-Message -Key "Common_PressEnter")
+        return $false
+    }
 
     if (Test-Path $newPath) {
         Write-Host "`n$(Get-Message -Key 'Move_DestExists')`n" -ForegroundColor Red
         Read-Host (Get-Message -Key "Common_PressEnter")
         return $false
     }
+
+    Write-Host ""
+    Write-Host "  $($server.Path)" -ForegroundColor DarkGray
+    Write-Host "  -> $newPath" -ForegroundColor Cyan
+    Write-Host ""
+    $confirm = Read-Host (Get-Message -Key "Common_ConfirmPrompt")
+    if ($confirm -ne (Get-Message -Key "ConfirmYes")) { return $false }
 
     Write-Host "`n$(Get-Message -Key 'Move_InProgress')" -ForegroundColor Cyan
 
@@ -517,8 +1125,8 @@ function Invoke-StartServer {
         return $false
     }
 
-    $gamePath    = Join-Path $server.Path "server"
-    $managerPath = Join-Path $server.Path "manager"
+    $gamePath    = Get-GamePath    $server
+    $managerPath = Get-ManagerPath $server
     $map         = $server.ConfiguredMap
     $gameMode    = $server.ConfiguredGameMode
     $port        = if ($server.FirewallPort) { [int]$server.FirewallPort } else { 27016 }
@@ -580,7 +1188,7 @@ Start-ServerWithMonitoring -InstallPath '$gamePath' -ManagerPath '$managerPath' 
 function Stop-ServerMonitoring {
     param($server)
 
-    $runningFile = Join-Path (Join-Path $server.Path "manager") ".running"
+    $runningFile = Join-Path (Get-ManagerPath $server) ".running"
     if (-not (Test-Path $runningFile)) {
         Write-Host "`n$(Get-Message -Key 'Common_InvalidOption')`n" -ForegroundColor Yellow
         return $false
@@ -637,8 +1245,8 @@ function Stop-ServerMonitoring {
 function Show-ServerStatusBox {
     param($server)
 
-    $gamePath    = Join-Path $server.Path "server"
-    $managerPath = Join-Path $server.Path "manager"
+    $gamePath    = Get-GamePath    $server
+    $managerPath = Get-ManagerPath $server
 
     $loadingRow = [Console]::CursorTop
     Write-Host "  $(Get-Message -Key 'Common_Loading')..." -ForegroundColor DarkGray
@@ -669,10 +1277,18 @@ function Show-ServerStatusBox {
     }
 
     # Installation Status
+    $instFile3 = Join-Path (Get-ManagerPath $server) ".installing"
+    $activeDl3 = $false
+    if (($server.Status -eq "Installing") -and (Test-Path $instFile3)) {
+        try { $d3 = Get-Content $instFile3 -Raw | ConvertFrom-Json; $activeDl3 = $null -ne (Get-Process -Id $d3.InstallerPID -ErrorAction SilentlyContinue) } catch {}
+        if (-not $activeDl3) { Remove-Item $instFile3 -Force -ErrorAction SilentlyContinue }
+    }
     if ($disk -eq "Installed" -and $server.Status -eq "Installed") {
         $instSymbol = "[OK]"; $instColor = "Green"; $instText = "ServerInfo_Installed"
+    } elseif ($activeDl3) {
+        $instSymbol = "[>>]"; $instColor = "Cyan"; $instText = "ServerInfo_Downloading"
     } elseif ($server.Status -eq "Installing") {
-        $instSymbol = "[>>]"; $instColor = "Cyan"; $instText = "ServerInfo_Installing"
+        $instSymbol = "[!!]"; $instColor = "Yellow"; $instText = "ServerInfo_Installing"
     } elseif ($disk -eq "Missing") {
         $instSymbol = "[--]"; $instColor = "Red"; $instText = "ServerInfo_Missing"
     } else {
@@ -688,7 +1304,7 @@ function Show-ServerStatusBox {
 
     # Firewall Status
     $fwPort = if ($server.FirewallPort) { [int]$server.FirewallPort } else { 27016 }
-    $rule = Get-ServerFirewallRule -ServerName $server.Name
+    $rule = Get-ServerFirewallRule -ServerName $server.Name -Port $fwPort
     if ($rule) {
         $fwSymbol = "[OK]"; $fwColor = "Green"; $fwText = "ServerInfo_FirewallOpen"
     } else {
@@ -790,6 +1406,7 @@ function Show-ServerStatusBox {
     }
 
     Write-Host "  $(Get-Message -Key 'ServerInfo_Port' -MsgArgs @($fwPort)): $fwSymbol $(Get-Message -Key $fwText)" -ForegroundColor $fwColor
+    Write-Host "              $(Get-Message -Key 'ServerInfo_FirewallThirdParty')" -ForegroundColor Yellow
     Write-Host "  $(Get-Message -Key 'ServerInfo_MetaMod'):   $mmSymbol $mmLabel" -ForegroundColor $mmColor
     Write-Host "  $(Get-Message -Key 'ServerInfo_SourceMod'): $smSymbol $smLabel" -ForegroundColor $smColor
     Write-Host "  $(Get-Message -Key 'ServerInfo_Status'): $runSymbol $(Get-Message -Key $runText)" -ForegroundColor $runColor
@@ -800,7 +1417,7 @@ function Show-ServerStatusBox {
 function Show-PlayersMenu {
     param([object]$Server)
 
-    $gamePath = Join-Path $Server.Path "server"
+    $gamePath = Get-GamePath $Server
     $adminIds = @()
     $modsConfigPath = Join-Path $RootPath "games\$($Server.Game)\configs\mods.json"
     if (Test-Path $modsConfigPath) {
@@ -947,23 +1564,33 @@ function Invoke-ManageServer {
     } else {
         for ($i = 0; $i -lt $servers.Count; $i++) {
             $s = $servers[$i]
-            $disk = Get-ServerDiskStatus -Path (Join-Path $s.Path "server")
+            $disk = Get-ServerDiskStatus -Path (Get-GamePath $s)
             $num = $i + 1
             $shortPath = Get-ShortPath -Path $s.Path
             $namePad = $s.Name.PadRight(16)
-
-            if ($disk -eq "Installed" -and $s.Status -eq "Installed") {
-                $symbol = "[OK]"; $color = "Green"
-            } elseif ($s.Status -eq "Installing") {
-                $symbol = "[>>]"; $color = "Cyan"
-            } elseif ($disk -eq "Missing") {
-                $symbol = "[--]"; $color = "Red"
-            } else {
-                $symbol = "[!!]"; $color = "Yellow"
+            $instFile2 = Join-Path (Get-ManagerPath $s) ".installing"
+            $activeDl2 = $false
+            if (($s.Status -eq "Installing") -and (Test-Path $instFile2)) {
+                try { $d2 = Get-Content $instFile2 -Raw | ConvertFrom-Json; $activeDl2 = $null -ne (Get-Process -Id $d2.InstallerPID -ErrorAction SilentlyContinue) } catch {}
+                if (-not $activeDl2) { Remove-Item $instFile2 -Force -ErrorAction SilentlyContinue }
             }
 
+            if ($disk -eq "Installed" -and $s.Status -eq "Installed") {
+                $symbol = "[OK]"; $color = "Green";  $tag = Get-Message -Key "ServerList_StatusOK"
+            } elseif ($activeDl2) {
+                $symbol = "[>>]"; $color = "Cyan";   $tag = Get-Message -Key "ServerList_StatusDownloading"
+            } elseif ($s.Status -eq "Installing") {
+                $symbol = "[!!]"; $color = "Yellow"; $tag = Get-Message -Key "ServerList_StatusInstalling"
+            } elseif ($disk -eq "Missing") {
+                $symbol = "[--]"; $color = "Red";    $tag = Get-Message -Key "ServerList_StatusMissing"
+            } else {
+                $symbol = "[!!]"; $color = "Yellow"; $tag = Get-Message -Key "ServerList_StatusError"
+            }
+
+            $line = "$symbol  $namePad $shortPath"
+            if (-not [string]::IsNullOrEmpty($tag)) { $line += "  $tag" }
             Write-Host "  $num) " -NoNewline
-            Write-Host "$symbol  $namePad $shortPath" -ForegroundColor $color
+            Write-Host $line -ForegroundColor $color
         }
         Write-Host ""
         Write-Host "====================================="
@@ -983,11 +1610,35 @@ function Invoke-ManageServer {
 
     while ($true) {
         Show-Header
-        $disk        = Get-ServerDiskStatus -Path (Join-Path $selected.Path "server")
+        $disk        = Get-ServerDiskStatus -Path (Get-GamePath $selected)
         $shortPath   = Get-ShortPath -Path $selected.Path
-        $managerPath = Join-Path $selected.Path "manager"
-        $runningFile = Join-Path $managerPath ".running"
+        $managerPath = Get-ManagerPath $selected
+        $runningFile    = Join-Path $managerPath ".running"
+        $installingFile = Join-Path $managerPath ".installing"
         $isRunning   = $false
+
+        # Check background installer process if .installing exists
+        if (Test-Path $installingFile) {
+            try {
+                $instData = Get-Content $installingFile -Raw | ConvertFrom-Json
+                $instProc = Get-Process -Id $instData.InstallerPID -ErrorAction SilentlyContinue
+                if (-not $instProc) {
+                    # Process gone but status not updated → crashed or killed
+                    $fresh = @(Get-ServerRegistry) | Where-Object { $_.ServerId -eq $selected.ServerId } | Select-Object -First 1
+                    if ($fresh -and $fresh.Status -eq "Installing") {
+                        Update-ServerStatus -ServerId $selected.ServerId -Status "Error"
+                        Write-Log "Installazione interrotta (processo terminato): $($selected.Name)" "WARNING"
+                    }
+                    Remove-Item $installingFile -Force -ErrorAction SilentlyContinue
+                }
+            } catch {
+                Remove-Item $installingFile -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        # Reload selected from registry to pick up status changes (install done, error, etc.)
+        $refreshed = @(Get-ServerRegistry) | Where-Object { $_.ServerId -eq $selected.ServerId } | Select-Object -First 1
+        if ($refreshed) { $selected = $refreshed }
 
         if (Test-Path $runningFile) {
             try {
@@ -1014,13 +1665,20 @@ function Invoke-ManageServer {
             }
         }
 
+        $isInstalling  = ($selected.Status -eq "Installing") -or ($selected.Status -eq "Error")
+        $isDownloading = ($selected.Status -eq "Installing") -and (Test-Path $installingFile)
+        $tagND = Get-Message -Key "Tag_ND"
+
         Write-Host (Format-SectionTitle $selected.Name)
         Write-Host "  $shortPath" -ForegroundColor DarkGray
 
         Show-ServerStatusBox -server $selected
 
         Write-Host "  --- SERVER ---" -ForegroundColor DarkGray
-        if ($isRunning) {
+        if ($isInstalling) {
+            Write-Host "  1) $(Get-Message -Key 'Manage_Start')  $tagND" -ForegroundColor DarkGray
+            Write-Host "  2) $(Get-Message -Key 'Manage_Restart')  $tagND" -ForegroundColor DarkGray
+        } elseif ($isRunning) {
             Write-Host "  1) $(Get-Message -Key 'Manage_Stop')"  -ForegroundColor Yellow
             Write-Host "  2) $(Get-Message -Key 'Manage_Restart')" -ForegroundColor Yellow
         } else {
@@ -1029,19 +1687,28 @@ function Invoke-ManageServer {
         }
         Write-Host ""
         Write-Host "  --- PLAYERS ---" -ForegroundColor DarkGray
-        if ($isRunning) {
+        if ($isRunning -and -not $isInstalling) {
             Write-Host "  P) $(Get-Message -Key 'Manage_Players')"
         } else {
             Write-Host "  P) $(Get-Message -Key 'Manage_Players')" -ForegroundColor DarkGray
         }
         Write-Host ""
         Write-Host "  --- CONFIGURATION ---" -ForegroundColor DarkGray
-        Write-Host "  3) $(Get-Message -Key 'Manage_ChangeSettings')"
-        Write-Host "  4) $(Get-Message -Key 'Manage_Firewall') (admin)"
-        Write-Host "  5) $(Get-Message -Key 'Manage_Mods')"
-        Write-Host "  6) $(Get-Message -Key 'Manage_Admins')"
-        Write-Host "  7) $(Get-Message -Key 'Manage_ServerSettings')"
-        Write-Host "  8) $(Get-Message -Key 'Manage_Plugins')" -ForegroundColor DarkGray
+        if ($isInstalling) {
+            Write-Host "  3) $(Get-Message -Key 'Manage_ChangeSettings')  $tagND" -ForegroundColor DarkGray
+            Write-Host "  4) $(Get-Message -Key 'Manage_Firewall')  $tagND" -ForegroundColor DarkGray
+            Write-Host "  5) $(Get-Message -Key 'Manage_Mods')  $tagND" -ForegroundColor DarkGray
+            Write-Host "  6) $(Get-Message -Key 'Manage_Admins')  $tagND" -ForegroundColor DarkGray
+            Write-Host "  7) $(Get-Message -Key 'Manage_ServerSettings')  $tagND" -ForegroundColor DarkGray
+            Write-Host "  8) $(Get-Message -Key 'Manage_Plugins')  $tagND" -ForegroundColor DarkGray
+        } else {
+            Write-Host "  3) $(Get-Message -Key 'Manage_ChangeSettings')"
+            Write-Host "  4) $(Get-Message -Key 'Manage_Firewall')  $(Get-Message -Key 'Tag_WIP')" -ForegroundColor Yellow
+            Write-Host "  5) $(Get-Message -Key 'Manage_Mods')"
+            Write-Host "  6) $(Get-Message -Key 'Manage_Admins')"
+            Write-Host "  7) $(Get-Message -Key 'Manage_ServerSettings')"
+            Write-Host "  8) $(Get-Message -Key 'Manage_Plugins')  $(Get-Message -Key 'Tag_WIP')" -ForegroundColor Yellow
+        }
         Write-Host ""
         Write-Host "  --- MANAGEMENT ---" -ForegroundColor DarkGray
         Write-Host "  9) $(Get-Message -Key 'Manage_Update')"
@@ -1051,15 +1718,31 @@ function Invoke-ManageServer {
         Write-Host " 13) $(Get-Message -Key 'Manage_Delete')"
         Write-Host ""
         Write-Host "  W) $(Get-Message -Key 'Manage_Wizard')" -ForegroundColor Cyan
-        Write-Host "  D) RCON Diagnostics [DEBUG]" -ForegroundColor DarkGray
+        if ($isDownloading) {
+            Write-Host ""
+            Write-Host "  $(Get-Message -Key 'Install_Downloading')" -ForegroundColor Yellow
+        }
+        Write-Host ""
+        Write-Host "  --- DEBUG ---" -ForegroundColor DarkGray
+        Write-Host "  D) RCON Diagnostics" -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "  R) $(Get-Message -Key 'Manage_Refresh')" -ForegroundColor DarkGray
         Write-Host "  0) $(Get-Message -Key 'Manage_Back')"
         Write-Host ""
 
         $action = Read-Host (Get-Message -Key "Common_Select")
 
+        # Guard: block actions unavailable in Installing state
+        $blockedWhenInstalling = @("1","2","3","4","5","6","7","8","P","p")
+        if ($isInstalling -and $action -in $blockedWhenInstalling) {
+            Write-Host "`n  $(Get-Message -Key 'Common_OptionUnavailable' -MsgArgs @($selected.Status))`n" -ForegroundColor DarkGray
+            Read-Host (Get-Message -Key "Common_PressEnter")
+            continue
+        }
+
         switch ($action) {
             "1" {
-                $runningFile = Join-Path (Join-Path $selected.Path "manager") ".running"
+                $runningFile = Join-Path (Get-ManagerPath $selected) ".running"
                 if (Test-Path $runningFile) {
                     $confirm = Read-Host (Get-Message -Key "Common_ConfirmPrompt")
                     if ($confirm -eq (Get-Message -Key "ConfirmYes")) {
@@ -1153,7 +1836,7 @@ function Invoke-ManageServer {
                 $dbgPort = if ($selected.FirewallPort) { [int]$selected.FirewallPort } else { 27016 }
                 Write-Host "  Server.Path     : $($selected.Path)"
                 Write-Host "  Server.FwPort   : $($selected.FirewallPort) -> using $dbgPort"
-                $dbgCfgFile = Join-Path (Join-Path $selected.Path "manager") "config.json"
+                $dbgCfgFile = Join-Path (Get-ManagerPath $selected) "config.json"
                 Write-Host "  Config file     : $dbgCfgFile"
                 if (Test-Path $dbgCfgFile) {
                     Write-Host "  Config exists   : YES" -ForegroundColor Green
@@ -1194,6 +1877,7 @@ function Invoke-ManageServer {
                 Write-Host ""
                 Read-Host (Get-Message -Key "Common_PressEnter")
             }
+            { $_ -in "R","r" } { continue }
             "0" { return }
             default {
                 Write-Host "`n$(Get-Message -Key 'Common_InvalidOption')`n" -ForegroundColor Yellow
@@ -1208,7 +1892,7 @@ function Invoke-ManageServer {
 function Invoke-RestartServer {
     param($server)
 
-    $managerPath = Join-Path $server.Path "manager"
+    $managerPath = Get-ManagerPath $server
     $runningFile = Join-Path $managerPath ".running"
 
     if (-not (Test-Path $runningFile)) {
@@ -1236,7 +1920,7 @@ function Invoke-RestartServer {
         return
     }
 
-    $gamePath = Join-Path $server.Path "server"
+    $gamePath = Get-GamePath $server
     $port     = if ($server.FirewallPort) { [int]$server.FirewallPort } else { 27016 }
 
     Write-Host ""
@@ -1312,7 +1996,7 @@ function Invoke-SetupWizard {
     # --- STEP 1: Server info (hostname, rcon_password, sv_steamgroup) ---
     Write-WizardStep 1 (Get-Message -Key "Wizard_Step1_Title")
 
-    $managerPath = Join-Path $Server.Path "manager"
+    $managerPath = Get-ManagerPath $Server
     $configPath  = Join-Path $managerPath "config.json"
     $serverConfig = if (Test-Path $configPath) {
         Get-Content $configPath -Raw | ConvertFrom-Json
@@ -1320,7 +2004,7 @@ function Invoke-SetupWizard {
         [PSCustomObject]@{ RconPassword = ""; Notes = "" }
     }
 
-    $cfgFile = Join-Path (Join-Path $Server.Path "server") "left4dead2\cfg\server.cfg"
+    $cfgFile = Join-Path (Get-GamePath $Server) "left4dead2\cfg\server.cfg"
     $currentHostname = ""
     $currentSteamGroup = ""
     if (Test-Path $cfgFile) {
@@ -1470,7 +2154,7 @@ function Invoke-SetupWizard {
     $adminFile = $null
     if (Test-Path $modsConfigPath) {
         $modConfig = Get-Content $modsConfigPath -Raw | ConvertFrom-Json
-        $adminFile = Join-Path (Join-Path $Server.Path "server") "$($modConfig.GameFolder)\addons\sourcemod\configs\admins_simple.ini"
+        $adminFile = Join-Path (Get-GamePath $Server) "$($modConfig.GameFolder)\addons\sourcemod\configs\admins_simple.ini"
     }
 
     $hasAdmins = $false
@@ -1515,7 +2199,7 @@ function Invoke-SetupWizard {
 function Invoke-ServerSettings {
     param($server)
 
-    $managerPath = Join-Path $server.Path "manager"
+    $managerPath = Get-ManagerPath $server
     $configPath  = Join-Path $managerPath "config.json"
 
     if (-not (Test-Path $managerPath)) {
@@ -1552,7 +2236,7 @@ function Invoke-ServerSettings {
                 $serverConfig | Add-Member -NotePropertyName RconPassword -NotePropertyValue $pwd -Force
                 $serverConfig | ConvertTo-Json | Set-Content $configPath -Encoding UTF8
 
-                $cfgFile = Join-Path (Join-Path $server.Path "server") "left4dead2\cfg\server.cfg"
+                $cfgFile = Join-Path (Get-GamePath $server) "left4dead2\cfg\server.cfg"
                 if (Test-Path $cfgFile) {
                     Generate-ServerCfg -ServerId $server.ServerId | Out-Null
                 }
@@ -1577,6 +2261,8 @@ function Invoke-Settings {
         Write-Host (Format-SectionTitle (Get-Message -Key "Settings_Title"))
         Write-Host ""
         Write-Host "  1) $(Get-Message -Key 'Settings_ChangeLang')"
+        Write-Host "  2) $(Get-Message -Key 'Settings_ChangeServerRoot'): $($config.DefaultInstallRoot)"
+        Write-Host "  3) $(Get-Message -Key 'Settings_ResetConfig')" -ForegroundColor DarkGray
         Write-Host "  0) $(Get-Message -Key 'Manage_Back')"
         Write-Host ""
 
@@ -1597,6 +2283,28 @@ function Invoke-Settings {
                     Start-Sleep -Seconds 2
                 }
             }
+            "2" {
+                $newRoot = Ask-DefaultInstallRoot -AllowCancel
+                if ($null -ne $newRoot) {
+                    Save-DefaultInstallRoot -ConfigPath "$RootPath\config\default_config.json" -Path $newRoot
+                    $config.DefaultInstallRoot = $newRoot
+                    Write-Host "`n$(Get-Message -Key 'Settings_ServerRootChanged')`n" -ForegroundColor Green
+                }
+                Start-Sleep -Seconds 2
+            }
+            "3" {
+                Write-Host "`n$(Get-Message -Key 'Settings_ResetConfirm')" -ForegroundColor Yellow
+                $confirm = Read-Host (Get-Message -Key "Common_ConfirmPrompt")
+                if ($confirm -eq (Get-Message -Key "ConfirmYes")) {
+                    $cfg = Get-Content "$RootPath\config\default_config.json" -Raw | ConvertFrom-Json
+                    $cfg.Language = ""
+                    $cfg.DefaultInstallRoot = "servers"
+                    $cfg | ConvertTo-Json -Depth 5 | Set-Content "$RootPath\config\default_config.json" -Encoding UTF8
+                    Write-Host (Get-Message -Key "Settings_ResetDone") -ForegroundColor Green
+                    Start-Sleep -Seconds 2
+                    return
+                }
+            }
             "0" { return }
             default {
                 Write-Host "`n$(Get-Message -Key 'Common_InvalidOption')`n" -ForegroundColor Yellow
@@ -1606,18 +2314,277 @@ function Invoke-Settings {
     }
 }
 
+# --- RECUPERO SERVER ---
+
+function Test-ServerStructure {
+    # Returns "managed" if path has manager/+server/ (tool structure)
+    # Returns "flat"    if path has srcds.exe directly (external structure)
+    # Returns $null     if not a recognizable server
+    param([string]$Path)
+    $hasManager = Test-Path (Join-Path $Path "manager")
+    $hasServer  = Test-Path (Join-Path $Path "server")
+    if ($hasManager -and $hasServer) { return "managed" }
+    if (Test-Path (Join-Path $Path "srcds.exe")) { return "flat" }
+    return $null
+}
+
+function Find-ServerCandidates {
+    # Given a path, returns all valid server roots (managed or flat structure).
+    # Checks the path itself, its parent, and immediate subfolders.
+    param([string]$Path)
+
+    $candidates = @()
+
+    # 1. The selected path itself
+    if ($null -ne (Test-ServerStructure -Path $Path)) {
+        $candidates += $Path
+        return $candidates
+    }
+
+    # 2. User may have selected a subfolder (server/, manager/, left4dead2/) by mistake
+    $parent = Split-Path -Parent $Path
+    if (-not [string]::IsNullOrEmpty($parent) -and ($null -ne (Test-ServerStructure -Path $parent))) {
+        $candidates += $parent
+        return $candidates
+    }
+
+    # 3. Scan immediate subfolders of selected path
+    $subs = @(Get-ChildItem -Path $Path -Directory -ErrorAction SilentlyContinue |
+        Where-Object {
+            (-not ($_.Attributes -band [System.IO.FileAttributes]::Hidden)) -and
+            (-not ($_.Attributes -band [System.IO.FileAttributes]::System))
+        } | Sort-Object Name)
+
+    foreach ($sub in $subs) {
+        if ($null -ne (Test-ServerStructure -Path $sub.FullName)) {
+            $candidates += $sub.FullName
+        }
+    }
+
+    return $candidates
+}
+
+function Invoke-RecoverSingle {
+    # Registers one already-validated server root path.
+    # If the server has a flat structure (srcds.exe in root), it is restructured
+    # to our format (files moved into server/, manager/ created) before registration.
+    # If restructuring fails, the import is cancelled with no side effects.
+    param([string]$ServerRootPath)
+
+    Show-Header
+    Write-Host (Format-SectionTitle (Get-Message -Key "Recover_Title"))
+    Write-Host ""
+
+    # Check not already registered
+    $existing = @(Get-ServerRegistry) | Where-Object { $_.Path -eq $ServerRootPath }
+    if ($existing) {
+        Write-Host "  $(Get-Message -Key 'Recover_AlreadyRegistered')" -ForegroundColor Yellow
+        Write-Host ""
+        Read-Host (Get-Message -Key "Common_PressEnter") | Out-Null
+        return
+    }
+
+    $structureType = Test-ServerStructure -Path $ServerRootPath
+    $folderName    = Split-Path -Leaf $ServerRootPath
+    $gamePath      = Join-Path $ServerRootPath "server"
+    $managerPath   = Join-Path $ServerRootPath "manager"
+
+    Write-Host "  $(Get-Message -Key 'Recover_AutoDetected' -MsgArgs @($ServerRootPath))" -ForegroundColor DarkGray
+    Write-Host ""
+
+    # --- Flat structure: must restructure before registration ---
+    if ($structureType -eq "flat") {
+        Write-Host "  $(Get-Message -Key 'Recover_FlatStructure')" -ForegroundColor Yellow
+        Write-Host ""
+        $confirm = Read-Host (Get-Message -Key "Common_ConfirmPrompt")
+        if ($confirm -ne (Get-Message -Key "ConfirmYes")) { return }
+
+        Write-Host ""
+        Write-Host "  $(Get-Message -Key 'Recover_Restructuring')" -ForegroundColor Cyan
+
+        try {
+            # 1. Create server/ and manager/ subfolders
+            New-Item -ItemType Directory -Path $gamePath    -Force -ErrorAction Stop | Out-Null
+            New-Item -ItemType Directory -Path $managerPath -Force -ErrorAction Stop | Out-Null
+
+            # 2. Move all existing items (files and folders) into server/
+            $items = @(Get-ChildItem -Path $ServerRootPath -ErrorAction Stop |
+                Where-Object { $_.Name -ne "server" -and $_.Name -ne "manager" })
+
+            foreach ($item in $items) {
+                Move-Item -Path $item.FullName -Destination $gamePath -ErrorAction Stop
+            }
+
+            Write-Host "  $(Get-Message -Key 'Recover_RestructureDone')" -ForegroundColor Green
+        }
+        catch {
+            Write-Log "Errore ristrutturazione server: $_" "ERROR"
+            Write-Host ""
+            Write-Host "  $(Get-Message -Key 'Recover_RestructureFailed' -MsgArgs @($_))" -ForegroundColor Red
+            Write-Host "  $(Get-Message -Key 'Recover_ImportCancelled')" -ForegroundColor Red
+            Write-Host ""
+            # Attempt to clean up partially created folders
+            if ((Test-Path $gamePath) -and (Get-ChildItem $gamePath).Count -eq 0) {
+                Remove-Item $gamePath -Force -ErrorAction SilentlyContinue
+            }
+            if ((Test-Path $managerPath) -and (Get-ChildItem $managerPath).Count -eq 0) {
+                Remove-Item $managerPath -Force -ErrorAction SilentlyContinue
+            }
+            Read-Host (Get-Message -Key "Common_PressEnter") | Out-Null
+            return
+        }
+    }
+
+    # --- At this point the structure is always managed (manager/+server/) ---
+
+    # Try to read existing manager config
+    $existingConfig = $null
+    $configFile = Join-Path $managerPath "config.json"
+    if (Test-Path $configFile) {
+        try { $existingConfig = Get-Content $configFile -Raw | ConvertFrom-Json } catch { }
+    }
+
+    $nameInput  = (Read-Host "  $(Get-Message -Key 'Recover_NamePrompt')").Trim()
+    $serverName = if ([string]::IsNullOrWhiteSpace($nameInput)) { $folderName } else { $nameInput }
+
+    $nameError = Test-ServerName -Name $serverName
+    if ($nameError) {
+        Write-Host "`n$nameError`n" -ForegroundColor Red
+        Read-Host (Get-Message -Key "Common_PressEnter") | Out-Null
+        return
+    }
+
+    $duplicate = Get-ServerByName -Name $serverName
+    if ($duplicate) {
+        Write-Host "`n$(Get-Message -Key 'Recover_NameExists')`n" -ForegroundColor Red
+        Read-Host (Get-Message -Key "Common_PressEnter") | Out-Null
+        return
+    }
+
+    $diskStatus  = Get-ServerDiskStatus -Path $gamePath
+    $regStatus   = if ($diskStatus -eq "Installed") { "Installed" } else { "Installing" }
+    $statusLabel = if ($regStatus -eq "Installed") { Get-Message -Key "Recover_StatusInstalled" } else { Get-Message -Key "Recover_StatusIncomplete" }
+
+    Write-Host ""
+    Write-Host "  $(Get-Message -Key 'Recover_Confirm' -MsgArgs @($serverName, $ServerRootPath))" -ForegroundColor Cyan
+    Write-Host "  $(Get-Message -Key 'ServerInfo_Status'): $statusLabel" -ForegroundColor DarkGray
+    Write-Host ""
+    $confirm = Read-Host (Get-Message -Key "Common_ConfirmPrompt")
+    if ($confirm -ne (Get-Message -Key "ConfirmYes")) { return }
+
+    $server = @{
+        ServerId           = [guid]::NewGuid().ToString()
+        Name               = $serverName
+        Game               = if ($existingConfig -and $existingConfig.Game) { $existingConfig.Game } else { "l4d2" }
+        Path               = $ServerRootPath
+        Status             = $regStatus
+        FirewallPort       = if ($existingConfig -and $existingConfig.FirewallPort) { [int]$existingConfig.FirewallPort } else { Get-NextAvailablePort -BasePort 27016 }
+        ConfiguredMap      = if ($existingConfig -and $existingConfig.ConfiguredMap) { $existingConfig.ConfiguredMap } else { $null }
+        ConfiguredGameMode = if ($existingConfig -and $existingConfig.ConfiguredGameMode) { $existingConfig.ConfiguredGameMode } else { $null }
+        CreatedAt          = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        LastUpdate         = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    }
+
+    Add-ServerToRegistry $server
+    Write-Log "Server recuperato: $serverName -> $ServerRootPath" "INFO"
+
+    Write-Host ""
+    Write-Host "  $(Get-Message -Key 'Recover_Done')" -ForegroundColor Green
+    Start-Sleep -Seconds 2
+}
+
+function Invoke-RecoverServer {
+    Show-Header
+    Write-Host (Format-SectionTitle (Get-Message -Key "Recover_Title"))
+    Write-Host ""
+    Write-Host "  $(Get-Message -Key 'Recover_Desc')" -ForegroundColor Cyan
+    Write-Host ""
+    Read-Host (Get-Message -Key "Common_PressEnter") | Out-Null
+
+    $chosenPath = Select-FolderInteractive
+    if ($null -eq $chosenPath) { return }
+
+    # Auto-detect: handles wrong subfolder, parent folder, or container folder
+    $candidates = @(Find-ServerCandidates -Path $chosenPath)
+
+    if ($candidates.Count -eq 0) {
+        Show-Header
+        Write-Host ""
+        Write-Host "  $(Get-Message -Key 'Recover_InvalidStructure')" -ForegroundColor Red
+        Write-Host ""
+        Read-Host (Get-Message -Key "Common_PressEnter") | Out-Null
+        return
+    }
+
+    if ($candidates.Count -eq 1) {
+        Invoke-RecoverSingle -ServerRootPath $candidates[0]
+        return
+    }
+
+    # Multiple candidates — let user pick
+    Show-Header
+    Write-Host (Format-SectionTitle (Get-Message -Key "Recover_Title"))
+    Write-Host ""
+    Write-Host "  $(Get-Message -Key 'Recover_MultipleFound' -MsgArgs @($candidates.Count))" -ForegroundColor Cyan
+    Write-Host ""
+    for ($i = 0; $i -lt $candidates.Count; $i++) {
+        Write-Host "  $($i + 1)) $($candidates[$i])"
+    }
+    Write-Host "  0) $(Get-Message -Key 'Common_Cancel')"
+    Write-Host ""
+
+    $sel = (Read-Host (Get-Message -Key "Common_Select")).Trim()
+    if ($sel -eq "0" -or [string]::IsNullOrWhiteSpace($sel)) { return }
+
+    if ($sel -match '^\d+$') {
+        $idx = [int]$sel - 1
+        if ($idx -ge 0 -and $idx -lt $candidates.Count) {
+            Invoke-RecoverSingle -ServerRootPath $candidates[$idx]
+            return
+        }
+    }
+
+    Write-Host "`n$(Get-Message -Key 'Common_InvalidSelection')`n" -ForegroundColor Red
+    Read-Host (Get-Message -Key "Common_PressEnter") | Out-Null
+}
+
 # --- LOOP PRINCIPALE ---
 
 # Controlla installazioni incomplete all'avvio
-$incomplete = @(Get-ServerRegistry | Where-Object {
-    $_.Status -ne "Installed" -or (Get-ServerDiskStatus -Path (Join-Path $_.Path "server")) -ne "Installed"
+$allIncomplete = @(Get-ServerRegistry | Where-Object {
+    $_.Status -ne "Installed" -or (Get-ServerDiskStatus -Path (Get-GamePath $_)) -ne "Installed"
 })
+
+# Separate active downloads (already running in background) from truly incomplete
+$activeDownloads = @($allIncomplete | Where-Object {
+    $instFile = Join-Path (Get-ManagerPath $_) ".installing"
+    if (-not (Test-Path $instFile)) { return $false }
+    try {
+        $instData = Get-Content $instFile -Raw | ConvertFrom-Json
+        $null -ne (Get-Process -Id $instData.InstallerPID -ErrorAction SilentlyContinue)
+    } catch { $false }
+})
+$incomplete = @($allIncomplete | Where-Object {
+    $serverId = $_.ServerId
+    -not ($activeDownloads | Where-Object { $_.ServerId -eq $serverId })
+})
+
+if ($activeDownloads.Count -gt 0) {
+    Show-Header
+    Write-Host "$(Get-Message -Key 'Startup_DownloadActive')`n" -ForegroundColor Cyan
+    foreach ($s in $activeDownloads) {
+        Write-Host "  [>>]  $($s.Name)" -ForegroundColor Cyan
+    }
+    Write-Host ""
+    Read-Host (Get-Message -Key "Common_PressEnter") | Out-Null
+}
+
 if ($incomplete.Count -gt 0) {
     Show-Header
     $diskLabel = Get-Message -Key "Resume_DiskLabel"
     if ($incomplete.Count -eq 1) {
         $s = $incomplete[0]
-        $disk = Get-ServerDiskStatus -Path (Join-Path $s.Path "server")
+        $disk = Get-ServerDiskStatus -Path (Get-GamePath $s)
         Write-Host "$(Get-Message -Key 'Startup_IncompleteOne')`n" -ForegroundColor Yellow
         Write-Host "  $($s.Name)  [$($diskLabel): $disk]"
         Write-Host ""
@@ -1627,7 +2594,7 @@ if ($incomplete.Count -gt 0) {
     else {
         Write-Host "$(Get-Message -Key 'Startup_IncompleteMany' -MsgArgs @($incomplete.Count))`n" -ForegroundColor Yellow
         foreach ($s in $incomplete) {
-            $disk = Get-ServerDiskStatus -Path (Join-Path $s.Path "server")
+            $disk = Get-ServerDiskStatus -Path (Get-GamePath $s)
             Write-Host "  - $($s.Name)  [$($diskLabel): $disk]"
         }
         Write-Host ""
@@ -1639,9 +2606,10 @@ if ($incomplete.Count -gt 0) {
 while ($true) {
     Show-Header
     $hasHidden = Show-ServerSummary
+    Show-SettingsSummary
 
     $hasIncomplete = (@(Get-ServerRegistry | Where-Object {
-        $_.Status -ne "Installed" -or (Get-ServerDiskStatus -Path (Join-Path $_.Path "server")) -ne "Installed"
+        $_.Status -ne "Installed" -or (Get-ServerDiskStatus -Path (Get-GamePath $_)) -ne "Installed"
     }).Count -gt 0)
 
     Show-Menu -ShowListOption $hasHidden -HasIncomplete $hasIncomplete
@@ -1660,8 +2628,9 @@ while ($true) {
                     Start-Sleep -Seconds 1
                 }
             }
-            "5" { Invoke-Settings }
-            "6" { Write-Log "Manager chiuso" "INFO"; exit }
+            "5" { Invoke-RecoverServer }
+            "6" { Invoke-Settings }
+            "7" { Write-Log "Manager chiuso" "INFO"; exit }
             default {
                 Write-Host "`n$(Get-Message -Key 'Common_InvalidOption')`n" -ForegroundColor Yellow
                 Start-Sleep -Seconds 1
@@ -1679,8 +2648,9 @@ while ($true) {
                     Start-Sleep -Seconds 1
                 }
             }
-            "4" { Invoke-Settings }
-            "5" { Write-Log "Manager chiuso" "INFO"; exit }
+            "4" { Invoke-RecoverServer }
+            "5" { Invoke-Settings }
+            "6" { Write-Log "Manager chiuso" "INFO"; exit }
             default {
                 Write-Host "`n$(Get-Message -Key 'Common_InvalidOption')`n" -ForegroundColor Yellow
                 Start-Sleep -Seconds 1

@@ -1,4 +1,4 @@
-$Port = 25565
+﻿$Port = 25565
 
 $PublicIP = (Invoke-RestMethod "https://ifconfig.me/ip").Trim()
 

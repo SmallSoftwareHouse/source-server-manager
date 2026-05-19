@@ -56,7 +56,7 @@ function Add-ServerToRegistry {
         return
     }
 
-    $registry += $server
+    $registry = @($registry) + @($server)
     Save-ServerRegistry $registry
 }
 
@@ -120,7 +120,7 @@ function Get-ServerById {
 function Validate-ServerRegistry {
 
     $registry = @(Get-ServerRegistry)
-    $rootServers = Join-Path $RootPath "servers"
+    $rootServers = Join-Path (Split-Path $RootPath -Parent) "servers"
 
     foreach ($s in $registry) {
 
@@ -139,7 +139,7 @@ function Validate-ServerRegistry {
                 $s.LastUpdate = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
             }
 
-            # se esiste su disco → OK
+            # se esiste su disco -> OK
             if (Test-Path $resolved) {
                 continue
             }

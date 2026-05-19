@@ -1,4 +1,4 @@
-function Start-ServerWithMonitoring {
+﻿function Start-ServerWithMonitoring {
     param(
         [string]$InstallPath,
         [string]$ManagerPath,

@@ -51,14 +51,15 @@ function Install-L4D2Server {
     param(
         [string]$SteamCmdPath,
         [string]$InstallDir,
-        [string]$SteamCmdDir
+        [string]$SteamCmdDir,
+        [string]$ScriptId = "default"
     )
 
     Write-Host (Get-Message -Key "Steam_InstallingL4D2")
     Write-Host (Get-Message -Key "Steam_Destination" -MsgArgs @($InstallDir))
 
-    # Lo script viene messo nella cartella steamcmd, non in quella del server
-    $scriptPath = Join-Path $SteamCmdDir "install_script.txt"
+    # Unique script per server to allow parallel installs
+    $scriptPath = Join-Path $SteamCmdDir "install_script_$ScriptId.txt"
 
     $commands = @(
         "force_install_dir `"$InstallDir`"",
@@ -93,6 +94,7 @@ function Install-L4D2Server {
         throw (Get-Message -Key "Steam_ExecFailed" -MsgArgs @($_))
     }
 
+    Remove-Item $scriptPath -Force -ErrorAction SilentlyContinue
     Write-Host (Get-Message -Key "Steam_InstallComplete")
 }
 

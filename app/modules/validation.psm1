@@ -90,7 +90,7 @@ function Resolve-ServerPath {
         }
 
         # -------------------------------------------------
-        # MATCH FORTEMENTE CONSISTENTE (IDENTITÀ SERVER)
+        # MATCH FORTEMENTE CONSISTENTE (IDENTITA SERVER)
         # -------------------------------------------------
         $marker = Join-Path $dir.FullName "server_id.txt"
 

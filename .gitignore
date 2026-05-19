@@ -2,28 +2,29 @@
 servers/
 
 # SteamCMD download cache
-downloads/
+app/downloads/
 
 # Runtime state files
 **/.running
+**/.installing
 **/players.json
 **/.mods_installed.json
 
 # Runtime logs
-logs/
+app/logs/
 
 # Local server registry (contains machine-specific paths)
-config/servers_registry.json
+app/config/servers_registry.json
 
 # Internal development files (not for public repo)
-CAPITOLATO.md
 CLAUDE.md
-SESSIONE.md
-TODO.md
-migrate_server_structure.ps1
+**/CAPITOLATO.md
+**/SESSIONE.md
+**/TODO.md
+app/migrate_server_structure.ps1
 
-# Notepad++ backups
-nppBackup/
+# Notepad++ backups (anywhere in the repo)
+**/nppBackup/
 
 # Claude Code internal data
 .claude/

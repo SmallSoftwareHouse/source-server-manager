@@ -1,8 +1,0 @@
-﻿{
-    "DefaultInstallRoot":  "servers",
-    "EnableFirewallRules":  true,
-    "EnableLogging":  true,
-    "DefaultMaxPlayers":  8,
-    "HeaderServerLimit":  5,
-    "Language":  "it"
-}

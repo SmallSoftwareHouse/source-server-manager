@@ -1,2 +1,2 @@
 @echo off
-powershell -NoExit -ExecutionPolicy Bypass -File "%~dp0main.ps1"
+powershell -NoExit -ExecutionPolicy Bypass -File "%~dp0app\main.ps1"

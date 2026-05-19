@@ -1,4 +1,4 @@
-function Enable-ServerFirewall {
+﻿function Enable-ServerFirewall {
     param(
         [string]$ServerName,
         [int]$Port = 27015
@@ -101,7 +101,8 @@ function Test-ServerPort {
 
 function Get-ServerFirewallRule {
     param(
-        [string]$ServerName
+        [string]$ServerName,
+        [int]$Port = 0
     )
 
     if ([string]::IsNullOrWhiteSpace($ServerName)) {
@@ -109,13 +110,19 @@ function Get-ServerFirewallRule {
         return $null
     }
 
-    Write-Log "Ricerca regole firewall per server $ServerName" "INFO"
+    Write-Log "Ricerca regole firewall per server $ServerName porta $Port" "INFO"
 
     try {
-        $rules = Get-NetFirewallRule -DisplayName "*L4D2-Server-$ServerName*" -ErrorAction SilentlyContinue
+        # Search by exact name if port is known, otherwise wildcard
+        if ($Port -gt 0) {
+            $ruleName = "L4D2-Server-$ServerName-$Port"
+            $rules = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
+        } else {
+            $rules = Get-NetFirewallRule -DisplayName "*L4D2-Server-$ServerName*" -ErrorAction SilentlyContinue
+        }
 
         if ($rules) {
-            Write-Log "Trovate $($rules.Count) regole per $ServerName" "INFO"
+            Write-Log "Trovata regola firewall per $ServerName" "INFO"
             return $rules
         }
         else {
@@ -193,7 +200,7 @@ function Show-FirewallMenu {
     $publicIP = Get-PublicIP
 
     while ($true) {
-        $rule = Get-ServerFirewallRule -ServerName $ServerName
+        $rule = Get-ServerFirewallRule -ServerName $ServerName -Port $Port
 
         if ($rule) {
             $messageKey = "Firewall_Open"
@@ -207,6 +214,8 @@ function Show-FirewallMenu {
         }
 
         Write-Host "`n$(Get-Message -Key 'Firewall_Title')`n" -ForegroundColor Cyan
+        Write-Host "  $(Get-Message -Key 'Firewall_ThirdPartyWarning')" -ForegroundColor Yellow
+        Write-Host ""
         Write-Host "Server     : $ServerName" -ForegroundColor DarkGray
         Write-Host "Local IP   : $localIP" -ForegroundColor DarkGray
         if ($publicIP) {
@@ -233,7 +242,7 @@ function Show-FirewallMenu {
         Write-Host -NoNewline "  2) "
         Write-Host -NoNewline "$(Get-Message -Key 'Firewall_TestExt') " -ForegroundColor DarkGray
         Write-Host "[$(Get-Message -Key 'Common_WIP')]" -ForegroundColor DarkYellow
-        Write-Host "  0) $(Get-Message -Key 'Common_Cancel')`n"
+        Write-Host "  0) $(Get-Message -Key 'Manage_Back')`n"
 
         $fwChoice = Read-Host (Get-Message -Key "Common_Select")
 
@@ -302,7 +311,7 @@ Show-FirewallMenu -ServerName `$ServerName -RootPath `$RootPath -Port `$Port
     $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) "firewall-$([guid]::NewGuid()).ps1"
     $scriptContent | Set-Content $tempScript -Encoding UTF8
 
-    Start-Process powershell.exe -Verb RunAs -ArgumentList "-File", "`"$tempScript`"" -WindowStyle Normal
+    Start-Process powershell.exe -Verb RunAs -ArgumentList "-File", "`"$tempScript`"" -WindowStyle Normal -Wait
     Write-Log "Finestra firewall lanciata in background" "INFO"
 }
 

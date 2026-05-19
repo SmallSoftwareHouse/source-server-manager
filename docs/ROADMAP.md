@@ -9,6 +9,9 @@ Core features are complete and working. The tool can install, configure, run and
 ## Implemented
 
 - Server install via SteamCMD with automatic download
+- **Background installation** — runs in a separate window, main program stays responsive
+- **Parallel multi-server install** — multiple servers can download simultaneously
+- **Live download monitoring** — status updates automatically on every menu refresh
 - Server registry (create, rename, move, delete)
 - Initial configuration (map and game mode selection)
 - Start / stop / restart with normal and auto-restart modes
@@ -18,6 +21,7 @@ Core features are complete and working. The tool can install, configure, run and
 - Windows Firewall rule management
 - RCON client (password configuration, command execution)
 - Live server status box (installation, mods, RCON, player count)
+- Context-aware menu (unavailable options shown as greyed N/A based on server state)
 - Multilingual interface (EN / IT)
 
 ---

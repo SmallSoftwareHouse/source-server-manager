@@ -12,8 +12,8 @@ Install, configure, start, update and monitor your game servers — no advanced 
 
 **Requirements:** Windows 10/11 · PowerShell 5.1 (built-in)
 
-```powershell
-.\main.ps1
+```
+start.bat
 ```
 
 [Full documentation →](docs/en/guide.md)
@@ -32,8 +32,8 @@ Installa, configura, avvia, aggiorna e monitora i tuoi server di gioco — senza
 
 **Requisiti:** Windows 10/11 · PowerShell 5.1 (preinstallato)
 
-```powershell
-.\main.ps1
+```
+start.bat
 ```
 
 [Documentazione completa →](docs/it/guida.md)
