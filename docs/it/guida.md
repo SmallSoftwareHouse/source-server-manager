@@ -33,13 +33,13 @@ Non è necessario installare software aggiuntivo manualmente. SteamCMD viene sca
 
 ## Installazione
 
-Scarica o clona il repository in una qualsiasi cartella del computer, poi esegui:
+Scarica o clona il repository in una qualsiasi cartella del computer, poi fai doppio click su `start.bat`, oppure esegui da PowerShell:
 
-```powershell
-.\main.ps1
+```
+.\start.bat
 ```
 
-Il tool è portabile — funziona da qualsiasi percorso e salva tutti i dati relativamente alla propria cartella.
+Il tool è portabile — funziona da qualsiasi percorso. Le installazioni dei server si trovano nella cartella `servers/`, separata dal codice dell'applicazione in `app/`.
 
 ---
 
@@ -77,6 +77,14 @@ Il tool valida nome e percorso prima di procedere. Se la cartella di destinazion
 
 SteamCMD viene scaricato automaticamente al primo utilizzo, poi il server dedicato L4D2 viene installato nel percorso scelto. I tempi di installazione dipendono dalla velocità della connessione e sono tipicamente di 10–30 minuti.
 
+### Installazione in background
+
+L'installazione viene eseguita in una **finestra separata** — il programma principale torna subito al menu. Puoi continuare a usare il tool, creare altri server o avviare un'altra installazione mentre la prima è ancora in corso.
+
+Il menu principale mostra `[>>]` in ciano accanto a ogni server che sta scaricando attivamente. Premi **R** nel menu del server per aggiornare lo stato in qualsiasi momento.
+
+Puoi installare più server contemporaneamente — ognuno gira nella propria finestra indipendente.
+
 ---
 
 ## Gestire un server
@@ -104,7 +112,9 @@ Prima di mostrare il menu delle azioni, viene visualizzata una scheda di stato c
 | Apri cartella | Apre la cartella del server in Esplora risorse |
 | Indietro | Torna al menu principale |
 
-Le opzioni non disponibili nello stato attuale vengono mostrate in grigio e non possono essere selezionate (ad esempio, Riavvia è grigio quando il server non è in esecuzione).
+Le opzioni non disponibili nello stato attuale vengono mostrate in grigio con il tag `[N/D]` e non possono essere selezionate. Ad esempio: Avvia, Configura, Mod e Admin sono tutte non disponibili finché l'installazione del server è incompleta o in errore — rimangono accessibili solo le operazioni di gestione (rinomina, sposta, elimina, aggiorna).
+
+Premi **R) Aggiorna stato** in qualsiasi momento per aggiornare la visualizzazione senza uscire dal menu.
 
 ---
 
@@ -252,9 +262,9 @@ La scheda di stato mostra `[OK] ***` quando la password è impostata, oppure `[-
 
 | Icona | Colore | Significato |
 |-------|--------|-------------|
-| `[OK]` | Verde | Server trovato su disco e nel registry |
-| `[>>]` | Ciano | Installazione in corso |
-| `[!!]` | Giallo | Installazione incompleta o stato non riconosciuto |
+| `[OK]` | Verde | Server installato e pronto |
+| `[>>]` | Ciano | Download attivamente in corso (finestra SteamCMD aperta) |
+| `[!!]` | Giallo | Installazione incompleta o errore (nessun download attivo) |
 | `[--]` | Rosso | Percorso non trovato su disco |
 
 ### Scheda di stato (menu gestione)
@@ -292,3 +302,12 @@ Usa **Gestisci → Arresta server** dal menu del tool. Termina sia il processo d
 
 **Il registry mostra un server come Mancante ma i file ci sono.**
 Il percorso salvato nel registry non corrisponde alla posizione effettiva della cartella. Usa **Gestisci → Sposta** e inserisci il percorso corretto per ricollegarli.
+
+**Posso installare più server contemporaneamente?**
+Sì. Ogni installazione gira nella propria finestra separata in modo indipendente. Il programma principale rimane sempre reattivo.
+
+**Ho chiuso la finestra di installazione per errore — cosa succede?**
+Lo stato del server viene impostato automaticamente a Errore la prossima volta che apri il menu del server. Da lì, seleziona **Aggiorna** (opzione 9) per riavviare l'installazione.
+
+**Il menu mostra `[!!]` giallo ma non sta scaricando niente.**
+L'installazione è stata interrotta (finestra chiusa, crash o interruzione di corrente). Seleziona **Aggiorna** dal menu del server per riprendere.

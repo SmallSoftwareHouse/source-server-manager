@@ -33,13 +33,13 @@ No additional software needs to be installed manually. SteamCMD is downloaded au
 
 ## Installation
 
-Download or clone the repository to any folder on your machine, then run:
+Download or clone the repository to any folder on your machine, then double-click `start.bat`, or run from PowerShell:
 
-```powershell
-.\main.ps1
+```
+.\start.bat
 ```
 
-The tool is portable — it works from any path and stores all data relative to its own folder.
+The tool is portable — it works from any path. Server installations are kept in the `servers/` folder, separate from the application code in `app/`.
 
 ---
 
@@ -77,6 +77,14 @@ The tool validates the name and path before proceeding. If the destination folde
 
 SteamCMD is downloaded automatically on first use, then the L4D2 Dedicated Server is installed at the chosen path. Installation time depends on connection speed and is typically 10–30 minutes.
 
+### Background installation
+
+Installation runs in a **separate window** — the main program returns to the menu immediately. You can continue using the tool, create other servers, or start another installation while the first one is still downloading.
+
+The main menu shows `[>>]` in cyan next to any server that is actively downloading. Press **R** in the server menu to refresh the status at any time.
+
+You can install multiple servers simultaneously — each runs in its own independent window.
+
 ---
 
 ## Managing a server
@@ -104,7 +112,9 @@ A status box shows the current state of the selected server before displaying th
 | Open folder | Open the server folder in Windows Explorer |
 | Back | Return to the main menu |
 
-Options that are not available in the current state are shown greyed out and cannot be selected (for example, Restart is greyed out when the server is not running).
+Options that are not available in the current state are shown greyed out with a `[N/A]` tag and cannot be selected. For example: Start, Configure, Mods and Admins are all unavailable while a server installation is incomplete or in error state — only management operations (rename, move, delete, update) remain accessible.
+
+Press **R) Refresh** at any time to update the status display without leaving the menu.
 
 ---
 
@@ -252,9 +262,9 @@ The status box shows `[OK] ***` when a password is set, or `[--] Not set` when i
 
 | Icon | Color | Meaning |
 |------|-------|---------|
-| `[OK]` | Green | Server found on disk and registry |
-| `[>>]` | Cyan | Installation in progress |
-| `[!!]` | Yellow | Incomplete install or unrecognised state |
+| `[OK]` | Green | Server installed and ready |
+| `[>>]` | Cyan | Download actively in progress (background window open) |
+| `[!!]` | Yellow | Installation incomplete or error (no active download) |
 | `[--]` | Red | Path not found on disk |
 
 ### Status box (manage menu)
@@ -292,3 +302,12 @@ Use **Manage → Stop server** from the tool menu. It terminates both the server
 
 **The server registry shows a server as Missing but the files are there.**
 The path stored in the registry does not match the actual folder location. Use **Manage → Move** and enter the correct path to re-link them.
+
+**Can I install multiple servers at the same time?**
+Yes. Each installation runs in its own separate window independently. The main program stays responsive throughout.
+
+**I closed the installation window by mistake — what happens?**
+The server status is set to Error automatically the next time you open the server menu. From there, select **Update** (option 9) to restart the installation.
+
+**The menu shows `[!!]` yellow but nothing is downloading.**
+The installation was interrupted (window closed, crash, or power loss). Select **Update** from the server menu to resume.
