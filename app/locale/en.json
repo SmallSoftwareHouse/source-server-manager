@@ -7,6 +7,7 @@
   "ConfirmYes": "y",
 
   "Common_PressEnter": "Press ENTER to continue",
+  "Common_ScrollHint": "^ window too small — scroll up to see the full menu",
   "Common_Select": "Select",
   "Common_SelectNumber": "Select number (0 to cancel)",
   "Common_InvalidSelection": "[ERROR] Invalid selection.",

@@ -7,6 +7,7 @@
   "ConfirmYes": "s",
 
   "Common_PressEnter": "Premi INVIO per continuare",
+  "Common_ScrollHint": "^ finestra troppo piccola — scorri su per vedere il menu completo",
   "Common_Select": "Seleziona",
   "Common_SelectNumber": "Seleziona numero (0 per annullare)",
   "Common_InvalidSelection": "[ERRORE] Selezione non valida.",

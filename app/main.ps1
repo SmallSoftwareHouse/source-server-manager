@@ -1801,6 +1801,7 @@ function Invoke-ManageServer {
         Write-Host "  R) $(Get-Message -Key 'Manage_Refresh')" -ForegroundColor DarkGray
         Write-Host "  0) $(Get-Message -Key 'Manage_Back')"
         Write-Host ""
+        Show-ScrollHint
 
         $action = Read-Host (Get-Message -Key "Common_Select")
 
