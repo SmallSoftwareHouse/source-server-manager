@@ -1433,23 +1433,56 @@ function Show-ServerStatusBox {
     Write-Host (" " * ([Console]::WindowWidth - 1)) -NoNewline
     [Console]::SetCursorPosition(0, $loadingRow)
 
+    # --- Info box with aligned labels ---
+    $boxWidth = 44
+    $divider  = "  " + ("=" * $boxWidth)
+
+    # Collect label strings for alignment
+    $lInstall  = Get-Message -Key "ServerInfo_Installation"
+    $lConfig   = Get-Message -Key "ServerInfo_Configuration"
+    $lMap      = Get-Message -Key "ServerInfo_Map"
+    $lMode     = Get-Message -Key "ServerInfo_GameMode"
+    $lPort     = Get-Message -Key "ServerInfo_Port"
+    $lMeta     = Get-Message -Key "ServerInfo_MetaMod"
+    $lSource   = Get-Message -Key "ServerInfo_SourceMod"
+    $lStatus   = Get-Message -Key "ServerInfo_Status"
+    $lRcon     = Get-Message -Key "ServerInfo_Rcon"
+
+    $colW = (@($lInstall,$lConfig,$lMap,$lMode,$lPort,$lMeta,$lSource,$lStatus,$lRcon) |
+             Measure-Object -Maximum -Property Length).Maximum + 1
+
+    function Write-InfoLine {
+        param([string]$Label, [string]$Value, [string]$Color = "White", [switch]$DimLabel)
+        $pad    = $Label.PadRight($colW)
+        $prefix = "  $pad : "
+        if ($DimLabel) {
+            Write-Host $prefix -NoNewline -ForegroundColor DarkGray
+        } else {
+            Write-Host $prefix -NoNewline
+        }
+        Write-Host $Value -ForegroundColor $Color
+    }
+
+    # Read Map/GameMode/Port from manager config (authoritative source)
+    $boxMeta = Get-GameMetadata -Game $server.Game
+    $boxCfg  = Get-ServerManagerConfig -ManagerPath $managerPath
+    $boxMap  = Resolve-ServerParam -ManagerConfig $boxCfg -Field "Map"     -MetadataDefault ($boxMeta.DefaultMap)      -HardcodedDefault "?"
+    $boxMode = Resolve-ServerParam -ManagerConfig $boxCfg -Field "GameMode"-MetadataDefault ($boxMeta.DefaultGameMode) -HardcodedDefault "?"
+    $boxPort = Resolve-ServerParam -ManagerConfig $boxCfg -Field "Port"    -MetadataDefault ($boxMeta.DefaultGamePort) -HardcodedDefault 27016
+
     Write-Host ""
-    Write-Host "  $(Get-Message -Key 'ServerInfo_Installation'): $instSymbol $(Get-Message -Key $instText)" -ForegroundColor $instColor
-    Write-Host "  $(Get-Message -Key 'ServerInfo_Configuration'): $cfgSymbol $(Get-Message -Key $cfgText)" -ForegroundColor $cfgColor
-
-    if (-not [string]::IsNullOrWhiteSpace($server.ConfiguredMap)) {
-        Write-Host "  Map: $($server.ConfiguredMap)"
-    }
-    if (-not [string]::IsNullOrWhiteSpace($server.ConfiguredGameMode)) {
-        Write-Host "  GameMode: $($server.ConfiguredGameMode)"
-    }
-
-    Write-Host "  $(Get-Message -Key 'ServerInfo_Port' -MsgArgs @($fwPort)): $fwSymbol $(Get-Message -Key $fwText)" -ForegroundColor $fwColor
-    Write-Host "              $(Get-Message -Key 'ServerInfo_FirewallThirdParty')" -ForegroundColor Yellow
-    Write-Host "  $(Get-Message -Key 'ServerInfo_MetaMod'):   $mmSymbol $mmLabel" -ForegroundColor $mmColor
-    Write-Host "  $(Get-Message -Key 'ServerInfo_SourceMod'): $smSymbol $smLabel" -ForegroundColor $smColor
-    Write-Host "  $(Get-Message -Key 'ServerInfo_Status'): $runSymbol $(Get-Message -Key $runText)" -ForegroundColor $runColor
-    Write-Host "  RCON: $rconSymbol $rconLabel$playersLabel" -ForegroundColor $rconColor
+    Write-Host $divider -ForegroundColor DarkGray
+    Write-InfoLine $lInstall "$instSymbol $(Get-Message -Key $instText)" $instColor
+    Write-InfoLine $lConfig  "$cfgSymbol $(Get-Message -Key $cfgText)"   $cfgColor
+    Write-InfoLine $lMap     $boxMap
+    Write-InfoLine $lMode    $boxMode
+    Write-InfoLine $lPort    "$boxPort  $fwSymbol $(Get-Message -Key $fwText)" $fwColor
+    Write-Host "  $(' ' * ($colW + 3))$(Get-Message -Key 'ServerInfo_FirewallThirdParty')" -ForegroundColor Yellow
+    Write-InfoLine $lMeta   "$mmSymbol $mmLabel" $mmColor
+    Write-InfoLine $lSource "$smSymbol $smLabel" $smColor
+    Write-InfoLine $lStatus "$runSymbol $(Get-Message -Key $runText)" $runColor
+    Write-InfoLine $lRcon   "$rconSymbol $rconLabel$playersLabel" $rconColor
+    Write-Host $divider -ForegroundColor DarkGray
     Write-Host ""
 }
 
@@ -1713,7 +1746,7 @@ function Invoke-ManageServer {
 
         Show-ServerStatusBox -server $selected
 
-        Write-Host "  --- SERVER ---" -ForegroundColor DarkGray
+        Write-Host "  --- $(Get-Message -Key 'Manage_Section_Server') ---" -ForegroundColor DarkGray
         if ($isInstalling) {
             Write-Host "  1) $(Get-Message -Key 'Manage_Start')  $tagND" -ForegroundColor DarkGray
             Write-Host "  2) $(Get-Message -Key 'Manage_Restart')  $tagND" -ForegroundColor DarkGray
@@ -1725,14 +1758,14 @@ function Invoke-ManageServer {
             Write-Host "  2) $(Get-Message -Key 'Manage_Restart')" -ForegroundColor DarkGray
         }
         Write-Host ""
-        Write-Host "  --- PLAYERS ---" -ForegroundColor DarkGray
+        Write-Host "  --- $(Get-Message -Key 'Manage_Section_Players') ---" -ForegroundColor DarkGray
         if ($isRunning -and -not $isInstalling) {
             Write-Host "  P) $(Get-Message -Key 'Manage_Players')"
         } else {
             Write-Host "  P) $(Get-Message -Key 'Manage_Players')" -ForegroundColor DarkGray
         }
         Write-Host ""
-        Write-Host "  --- CONFIGURATION ---" -ForegroundColor DarkGray
+        Write-Host "  --- $(Get-Message -Key 'Manage_Section_Configuration') ---" -ForegroundColor DarkGray
         if ($isInstalling) {
             Write-Host "  3) $(Get-Message -Key 'Manage_ChangeSettings')  $tagND" -ForegroundColor DarkGray
             Write-Host "  4) $(Get-Message -Key 'Manage_Firewall')  $tagND" -ForegroundColor DarkGray
@@ -1749,7 +1782,7 @@ function Invoke-ManageServer {
             Write-Host "  8) $(Get-Message -Key 'Manage_Plugins')  $(Get-Message -Key 'Tag_WIP')" -ForegroundColor Yellow
         }
         Write-Host ""
-        Write-Host "  --- MANAGEMENT ---" -ForegroundColor DarkGray
+        Write-Host "  --- $(Get-Message -Key 'Manage_Section_Management') ---" -ForegroundColor DarkGray
         Write-Host "  9) $(Get-Message -Key 'Manage_Update')"
         Write-Host " 10) $(Get-Message -Key 'Manage_OpenFolder')"
         Write-Host " 11) $(Get-Message -Key 'Manage_Rename')"
@@ -1762,7 +1795,7 @@ function Invoke-ManageServer {
             Write-Host "  $(Get-Message -Key 'Install_Downloading')" -ForegroundColor Yellow
         }
         Write-Host ""
-        Write-Host "  --- DEBUG ---" -ForegroundColor DarkGray
+        Write-Host "  --- $(Get-Message -Key 'Manage_Section_Debug') ---" -ForegroundColor DarkGray
         Write-Host "  D) RCON Diagnostics" -ForegroundColor DarkGray
         Write-Host ""
         Write-Host "  R) $(Get-Message -Key 'Manage_Refresh')" -ForegroundColor DarkGray
@@ -2291,22 +2324,16 @@ function Invoke-ServerSettings {
         $rconDisplay = if ([string]::IsNullOrWhiteSpace($sc.RconPassword)) {
             "[--] $(Get-Message -Key 'SrvSettings_NotSet')" } else { "[OK] ***" }
 
-        $portVal = Resolve-ServerParam -ManagerConfig $sc -Field "Port" `
+        $portVal  = Resolve-ServerParam -ManagerConfig $sc -Field "Port" `
             -MetadataDefault ($meta.DefaultGamePort) -HardcodedDefault 27016
-        $mapVal = Resolve-ServerParam -ManagerConfig $sc -Field "Map" `
-            -MetadataDefault ($meta.DefaultMap) -HardcodedDefault "c1m4_atrium"
-        $modeVal = Resolve-ServerParam -ManagerConfig $sc -Field "GameMode" `
-            -MetadataDefault ($meta.DefaultGameMode) -HardcodedDefault "coop"
-        $ipVal = if ($sc.LaunchIp) { $sc.LaunchIp } else { "($(Get-Message -Key 'SrvSettings_NotSet'))" }
+        $ipVal    = if ($sc.LaunchIp) { $sc.LaunchIp } else { "($(Get-Message -Key 'SrvSettings_NotSet'))" }
         $extraVal = if ($sc.ExtraArgs -and $sc.ExtraArgs.Count -gt 0) {
             $sc.ExtraArgs -join " " } else { "($(Get-Message -Key 'SrvSettings_NotSet'))" }
 
         Write-Host "  1) $(Get-Message -Key 'SrvSettings_RconPassword'): $rconDisplay"
         Write-Host "  2) $(Get-Message -Key 'SrvSettings_Port'): $portVal"
-        Write-Host "  3) $(Get-Message -Key 'SrvSettings_Map'): $mapVal"
-        Write-Host "  4) $(Get-Message -Key 'SrvSettings_GameMode'): $modeVal"
-        Write-Host "  5) $(Get-Message -Key 'SrvSettings_IpBinding'): $ipVal"
-        Write-Host "  6) $(Get-Message -Key 'SrvSettings_ExtraArgs'): $extraVal"
+        Write-Host "  3) $(Get-Message -Key 'SrvSettings_IpBinding'): $ipVal"
+        Write-Host "  4) $(Get-Message -Key 'SrvSettings_ExtraArgs'): $extraVal"
         Write-Host "  0) $(Get-Message -Key 'Manage_Back')"
         Write-Host ""
 
@@ -2325,9 +2352,9 @@ function Invoke-ServerSettings {
 
             "2" {
                 Write-Host ""
-                $input = Read-Host (Get-Message -Key "SrvSettings_PortPrompt")
+                $portInput = Read-Host (Get-Message -Key "SrvSettings_PortPrompt")
                 $newPort = 0
-                if ([int]::TryParse($input, [ref]$newPort) -and $newPort -ge 1024 -and $newPort -le 65535) {
+                if ([int]::TryParse($portInput, [ref]$newPort) -and $newPort -ge 1024 -and $newPort -le 65535) {
                     $sc | Add-Member -NotePropertyName Port -NotePropertyValue $newPort -Force
                     Save-ServerConfig
                     Write-Host "`n$(Get-Message -Key 'SrvSettings_Saved')`n" -ForegroundColor Green
@@ -2338,57 +2365,6 @@ function Invoke-ServerSettings {
             }
 
             "3" {
-                $sel = Select-ServerMapAndGameMode -GameType $server.Game
-                if ($sel) {
-                    $sc | Add-Member -NotePropertyName Map      -NotePropertyValue $sel.Map      -Force
-                    $sc | Add-Member -NotePropertyName GameMode -NotePropertyValue $sel.GameMode -Force
-                    # Keep registry in sync for display
-                    $reg = @(Get-ServerRegistry)
-                    foreach ($s in $reg) {
-                        if ($s.ServerId -eq $server.ServerId) {
-                            $s | Add-Member -NotePropertyName ConfiguredMap      -NotePropertyValue $sel.Map      -Force
-                            $s | Add-Member -NotePropertyName ConfiguredGameMode -NotePropertyValue $sel.GameMode -Force
-                        }
-                    }
-                    Save-ServerRegistry $reg
-                    Save-ServerConfig
-                    Write-Host "`n$(Get-Message -Key 'SrvSettings_Saved')`n" -ForegroundColor Green
-                    Start-Sleep -Seconds 1
-                }
-            }
-
-            "4" {
-                # Game mode only
-                $gamesDir     = Join-Path $RootPath "games\$($server.Game)\configs"
-                $gamemodesFile = Join-Path $gamesDir "gamemodes.json"
-                if (Test-Path $gamemodesFile) {
-                    $gamemodes = @(Get-Content $gamemodesFile -Raw | ConvertFrom-Json)
-                    Write-Host ""
-                    for ($i = 0; $i -lt $gamemodes.Count; $i++) {
-                        Write-Host "  $($i+1)) $($gamemodes[$i].name) - $($gamemodes[$i].description)"
-                    }
-                    Write-Host ""
-                    $gmSel = Read-Host (Get-Message -Key "Common_SelectNumber")
-                    $gmIdx = [int]$gmSel - 1
-                    if ($gmIdx -ge 0 -and $gmIdx -lt $gamemodes.Count) {
-                        $sc | Add-Member -NotePropertyName GameMode -NotePropertyValue $gamemodes[$gmIdx].id -Force
-                        $reg = @(Get-ServerRegistry)
-                        foreach ($s in $reg) {
-                            if ($s.ServerId -eq $server.ServerId) {
-                                $s | Add-Member -NotePropertyName ConfiguredGameMode -NotePropertyValue $gamemodes[$gmIdx].id -Force
-                            }
-                        }
-                        Save-ServerRegistry $reg
-                        Save-ServerConfig
-                        Write-Host "`n$(Get-Message -Key 'SrvSettings_Saved')`n" -ForegroundColor Green
-                    } else {
-                        Write-Host "`n$(Get-Message -Key 'Common_InvalidSelection')`n" -ForegroundColor Red
-                    }
-                    Start-Sleep -Seconds 1
-                }
-            }
-
-            "5" {
                 Write-Host ""
                 $newIp = (Read-Host (Get-Message -Key "SrvSettings_IpPrompt")).Trim()
                 $sc | Add-Member -NotePropertyName LaunchIp -NotePropertyValue $newIp -Force
@@ -2397,14 +2373,13 @@ function Invoke-ServerSettings {
                 Start-Sleep -Seconds 1
             }
 
-            "6" {
+            "4" {
                 Write-Host ""
                 $curExtra = if ($sc.ExtraArgs -and $sc.ExtraArgs.Count -gt 0) { $sc.ExtraArgs -join " " } else { "" }
                 Write-Host "  $(Get-Message -Key 'SrvSettings_ExtraArgsCurrent'): $curExtra" -ForegroundColor DarkGray
                 Write-Host ""
                 $newExtra = (Read-Host (Get-Message -Key "SrvSettings_ExtraArgsPrompt")).Trim()
                 $extraArray = if ([string]::IsNullOrWhiteSpace($newExtra)) { @() } else {
-                    # Split preserving quoted groups (e.g. +exec "my file.cfg")
                     $newExtra -split '\s+(?=(?:[^"]*"[^"]*")*[^"]*$)'
                 }
                 $sc | Add-Member -NotePropertyName ExtraArgs -NotePropertyValue $extraArray -Force
