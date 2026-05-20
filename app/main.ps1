@@ -1931,9 +1931,11 @@ function Invoke-ManageServer {
                 $dgDisk = Get-ServerDiskStatus -Path $dgGame -Game $selected.Game
                 $dgDiskColor = if ($dgDisk -eq "Installed") { "Green" } else { "Yellow" }
                 Write-DiagLine "Disk"   $dgDisk $dgDiskColor
-                $dgRunFile = Join-Path $dgMgr ".running"
-                $dgRunning = (Test-Path $dgRunFile)
-                Write-DiagLine "Running" (if ($dgRunning) { "YES" } else { "NO" }) (if ($dgRunning) { "Green" } else { "DarkGray" })
+                $dgRunFile    = Join-Path $dgMgr ".running"
+                $dgRunning    = (Test-Path $dgRunFile)
+                $dgRunLabel   = if ($dgRunning) { "YES" } else { "NO" }
+                $dgRunColor   = if ($dgRunning) { "Green" } else { "DarkGray" }
+                Write-DiagLine "Running" $dgRunLabel $dgRunColor
 
                 # ── [2] CONFIG (manager/config.json) ─────────────────────────
                 Write-DiagSection "[2] CONFIG  (manager/config.json)"
@@ -1953,7 +1955,9 @@ function Invoke-ManageServer {
                         Write-DiagLine "GameMode" $dgMode
                         Write-DiagLine "Port"     "$dgPort"
                         Write-DiagLine "LaunchIp" $dgIpRaw
-                        Write-DiagLine "RCON pwd" (if ($dgPwdSet) { "SET (len=$($dgCfg.RconPassword.Length))" } else { "EMPTY" }) (if ($dgPwdSet) { "Green" } else { "Red" })
+                        $dgPwdLabel = if ($dgPwdSet) { "SET (len=$($dgCfg.RconPassword.Length))" } else { "EMPTY" }
+                        $dgPwdColor = if ($dgPwdSet) { "Green" } else { "Red" }
+                        Write-DiagLine "RCON pwd" $dgPwdLabel $dgPwdColor
                         Write-DiagLine "ExtraArgs" $dgExtra
                     } catch {
                         Write-Host "  [ERROR] Cannot parse config.json: $_" -ForegroundColor Red
@@ -1988,9 +1992,11 @@ function Invoke-ManageServer {
 
                 # ── [4] RCON ─────────────────────────────────────────────────
                 Write-DiagSection "[4] RCON"
-                $dgRconPort = if ($dgCfg -and $dgCfg.Port) { [int]$dgCfg.Port } else { 27016 }
-                $dgAddr = Find-RconAddress -Port $dgRconPort
-                Write-DiagLine "Address" (if ($dgAddr) { "$dgAddr`:$dgRconPort" } else { "NOT FOUND" }) (if ($dgAddr) { "Cyan" } else { "Red" })
+                $dgRconPort  = if ($dgCfg -and $dgCfg.Port) { [int]$dgCfg.Port } else { 27016 }
+                $dgAddr      = Find-RconAddress -Port $dgRconPort
+                $dgAddrLabel = if ($dgAddr) { "$dgAddr`:$dgRconPort" } else { "NOT FOUND" }
+                $dgAddrColor = if ($dgAddr) { "Cyan" } else { "Red" }
+                Write-DiagLine "Address" $dgAddrLabel $dgAddrColor
                 if ($dgAddr) {
                     try {
                         $dgTcp = New-Object System.Net.Sockets.TcpClient
