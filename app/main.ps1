@@ -2026,16 +2026,19 @@ function Invoke-ManageServer {
                 }
 
                 if ($dgServerPid -gt 0) {
-                    # Show only ports owned by the srcds process
-                    $dgSrcdsPorts = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
-                        Where-Object { $_.OwningProcess -eq $dgServerPid }
+                    # Show only the configured game port owned by srcds
+                    # (srcds also opens internal ephemeral ports on loopback — we ignore those)
+                    $dgGamePort   = if ($dgCfg -and $dgCfg.Port) { [int]$dgCfg.Port } else { 27016 }
+                    $dgSrcdsMatch = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+                        Where-Object { $_.OwningProcess -eq $dgServerPid -and $_.LocalPort -eq $dgGamePort }
 
-                    if ($dgSrcdsPorts) {
-                        foreach ($c in $dgSrcdsPorts) {
+                    if ($dgSrcdsMatch) {
+                        foreach ($c in $dgSrcdsMatch) {
                             Write-Host ("  {0,-22} PID {1}  [srcds]" -f "$($c.LocalAddress):$($c.LocalPort)", $dgServerPid) -ForegroundColor Green
                         }
                     } else {
-                        Write-Host "  srcds (PID $dgServerPid) has no TCP ports in Listen state" -ForegroundColor Yellow
+                        Write-Host "  srcds running (PID $dgServerPid) but port $dgGamePort not in Listen state" -ForegroundColor Yellow
+                        Write-Host "  (server may still be starting up)" -ForegroundColor DarkGray
                     }
                 } else {
                     Write-Host "  Server not running — no ports to show" -ForegroundColor DarkGray
