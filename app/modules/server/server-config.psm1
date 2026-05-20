@@ -19,7 +19,13 @@
         return $false
     }
 
-    $cfgPath = Join-Path (Join-Path $server.Path "server") "left4dead2\cfg\server.cfg"
+    $gameMetadata = $null
+    $metaFile = Join-Path $RootPath "games\$($server.Game)\metadata.json"
+    if (Test-Path $metaFile) {
+        try { $gameMetadata = Get-Content $metaFile -Raw | ConvertFrom-Json } catch { }
+    }
+    $gameFolder = if ($gameMetadata -and $gameMetadata.GameFolder) { $gameMetadata.GameFolder } else { $server.Game }
+    $cfgPath = Join-Path (Join-Path $server.Path "server") "$gameFolder\cfg\server.cfg"
 
     $cfgDirectory = Split-Path $cfgPath -Parent
 
@@ -183,14 +189,16 @@ function Initialize-ServerConfiguration {
         return $false
     }
 
-    $batchPath = Join-Path (Join-Path $server.Path "manager") "start_server.bat"
-    $serverPort = if ($server.FirewallPort) { [int]$server.FirewallPort } else { 27016 }
+    $batchPath   = Join-Path (Join-Path $server.Path "manager") "start_server.bat"
+    $serverPort  = if ($server.FirewallPort) { [int]$server.FirewallPort } else { 27016 }
     $launchResult = Get-ServerLaunchBatch `
         -InstallPath (Join-Path $server.Path "server") `
-        -GameMode $config.GameMode `
-        -Map $config.Map `
-        -Port $serverPort `
-        -OutputPath $batchPath
+        -ManagerPath (Join-Path $server.Path "manager") `
+        -Game        $server.Game `
+        -GameMode    $config.GameMode `
+        -Map         $config.Map `
+        -Port        $serverPort `
+        -OutputPath  $batchPath
 
     if (-not $launchResult) {
         Write-Log "Failed to create launch batch for: $ServerId" "ERROR"
@@ -228,7 +236,7 @@ function Update-ServerMapAndGameMode {
     }
 
     if ($server.Status -ne "Configured") {
-        Write-Host "`nServer non configurato. Eseguire prima l'inizializzazione.`n" -ForegroundColor Red
+        Write-Host "`n$(Get-Message -Key 'Config_NotConfigured')`n" -ForegroundColor Red
         return $false
     }
 

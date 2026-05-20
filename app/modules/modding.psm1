@@ -259,7 +259,15 @@ function Invoke-InstallFlow {
             $fresh = @(Get-ServerRegistry) | Where-Object { $_.ServerId -eq $Server.ServerId } | Select-Object -First 1
             if ($fresh -and $fresh.ConfiguredMap -and $fresh.ConfiguredGameMode) {
                 $port = if ($fresh.FirewallPort) { [int]$fresh.FirewallPort } else { 27016 }
-                $newPid = Start-ServerNormal -InstallPath $gamePath -GameMode $fresh.ConfiguredGameMode -Map $fresh.ConfiguredMap -Port $port
+                $modLaunchCmd = Build-ServerLaunchCommand `
+                    -InstallPath $gamePath `
+                    -ManagerPath $managerPath `
+                    -Game        $fresh.Game `
+                    -Map         $fresh.ConfiguredMap `
+                    -GameMode    $fresh.ConfiguredGameMode `
+                    -Port        $port
+                $modArgString = if ($modLaunchCmd) { $modLaunchCmd.Arguments } else { "" }
+                $newPid = Start-ServerNormal -InstallPath $gamePath -ArgString $modArgString
                 if ($newPid -gt 0) {
                     @{
                         ServerPath      = $Server.Path

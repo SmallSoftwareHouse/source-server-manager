@@ -1,10 +1,8 @@
-﻿function Start-ServerWithMonitoring {
+function Start-ServerWithMonitoring {
     param(
         [string]$InstallPath,
         [string]$ManagerPath,
-        [string]$GameMode,
-        [string]$Map,
-        [int]$Port = 27015
+        [string]$ArgString
     )
 
     $srcdsPath = Join-Path $InstallPath "srcds.exe"
@@ -14,28 +12,8 @@
         return $false
     }
 
-    $cmdArgs = @(
-        "-console",
-        "-game left4dead2",
-        "-server",
-        "-nohltv",
-        "+sv_lan 0",
-        "+sv_pure 1",
-        "+exec server.cfg",
-        "+map $Map"
-    )
-
-    if ($GameMode) {
-        $cmdArgs += "+mp_gamemode $GameMode"
-    }
-
-    if ($Port -gt 0) {
-        $cmdArgs += "-port $Port"
-    }
-
-    $argString = $cmdArgs -join " "
-
     Write-Log "Starting server monitoring: $srcdsPath" "INFO"
+    Write-Log "Launch args: $ArgString" "INFO"
 
     $crashCount = 0
     $maxCrashes = 100
@@ -43,7 +21,7 @@
     while ($crashCount -lt $maxCrashes) {
         try {
             $process = Start-Process -FilePath $srcdsPath `
-                -ArgumentList $argString `
+                -ArgumentList $ArgString `
                 -WorkingDirectory $InstallPath `
                 -PassThru `
                 -WindowStyle Hidden
@@ -81,9 +59,7 @@
 function Start-ServerNormal {
     param(
         [string]$InstallPath,
-        [string]$GameMode,
-        [string]$Map,
-        [int]$Port = 27015
+        [string]$ArgString
     )
 
     $srcdsPath = Join-Path $InstallPath "srcds.exe"
@@ -93,32 +69,12 @@ function Start-ServerNormal {
         return $false
     }
 
-    $cmdArgs = @(
-        "-console",
-        "-game left4dead2",
-        "-server",
-        "-nohltv",
-        "+sv_lan 0",
-        "+sv_pure 1",
-        "+exec server.cfg",
-        "+map $Map"
-    )
-
-    if ($GameMode) {
-        $cmdArgs += "+mp_gamemode $GameMode"
-    }
-
-    if ($Port -gt 0) {
-        $cmdArgs += "-port $Port"
-    }
-
-    $argString = $cmdArgs -join " "
-
     Write-Log "Starting server (no monitoring): $srcdsPath" "INFO"
+    Write-Log "Launch args: $ArgString" "INFO"
 
     try {
         $process = Start-Process -FilePath $srcdsPath `
-            -ArgumentList $argString `
+            -ArgumentList $ArgString `
             -WorkingDirectory $InstallPath `
             -WindowStyle Hidden `
             -PassThru

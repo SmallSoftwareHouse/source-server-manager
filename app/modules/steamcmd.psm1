@@ -1,4 +1,4 @@
-﻿function Install-SteamCMD {
+function Install-SteamCMD {
     param(
         [string]$Path
     )
@@ -47,9 +47,10 @@
     return $steamCmdExe
 }
 
-function Install-L4D2Server {
+function Install-GameServer {
     param(
         [string]$SteamCmdPath,
+        [string]$AppId,
         [string]$InstallDir,
         [string]$SteamCmdDir,
         [string]$ScriptId = "default"
@@ -64,7 +65,7 @@ function Install-L4D2Server {
     $commands = @(
         "force_install_dir `"$InstallDir`"",
         "login anonymous",
-        "app_update 222860 validate",
+        "app_update $AppId validate",
         "quit"
     )
 
@@ -98,4 +99,4 @@ function Install-L4D2Server {
     Write-Host (Get-Message -Key "Steam_InstallComplete")
 }
 
-Export-ModuleMember -Function Install-SteamCMD, Install-L4D2Server
+Export-ModuleMember -Function Install-SteamCMD, Install-GameServer

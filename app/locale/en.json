@@ -231,6 +231,7 @@
   "Config_SelectGameMode": "Select Game Mode",
   "Config_SelectMap": "Select Map",
   "Config_MapsNotFound": "[ERROR] maps.json file not found.",
+  "Config_NotConfigured": "Server is not configured. Run initial configuration first.",
   "Config_GamemodesNotFound": "[ERROR] gamemodes.json file not found.",
 
   "Start_Title": "Starting server {0}",

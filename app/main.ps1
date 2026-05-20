@@ -606,13 +606,23 @@ function Start-ServerInstall {
     if (-not (Test-Path $gamePath))       { New-Item -ItemType Directory -Path $gamePath       -Force | Out-Null }
     if (-not (Test-Path $managerPath))    { New-Item -ItemType Directory -Path $managerPath    -Force | Out-Null }
 
-    $managerConfig = Join-Path $managerPath "config.json"
-    if (-not (Test-Path $managerConfig)) {
-        @{ RconPassword = ""; Notes = "" } | ConvertTo-Json | Set-Content $managerConfig -Encoding UTF8
+    $managerConfigFile = Join-Path $managerPath "config.json"
+    if (-not (Test-Path $managerConfigFile)) {
+        @{ RconPassword = ""; Notes = ""; LaunchIp = ""; ExtraArgs = @() } | ConvertTo-Json | Set-Content $managerConfigFile -Encoding UTF8
     }
 
     $steamDir = Join-Path $RootPath "downloads\steamcmd"
     if (-not (Test-Path $steamDir)) { New-Item -ItemType Directory -Path $steamDir -Force | Out-Null }
+
+    # Read AppId from game metadata (no hardcoded values)
+    $gameMetaFile = Join-Path $RootPath "games\$($target.Game)\metadata.json"
+    $targetAppId  = "0"
+    if (Test-Path $gameMetaFile) {
+        try {
+            $gameMeta    = Get-Content $gameMetaFile -Raw | ConvertFrom-Json
+            $targetAppId = [string]$gameMeta.SteamAppId
+        } catch { }
+    }
 
     Write-Host "`n$(Get-Message -Key 'Install_Starting' -MsgArgs @($target.Name))`n" -ForegroundColor Cyan
     Write-Host (Get-Message -Key "Install_SteamCmdNote")
@@ -644,7 +654,7 @@ Write-Host ''
 
 try {
     `$exe = Install-SteamCMD -Path '$steamDir'
-    Install-L4D2Server -SteamCmdPath `$exe -InstallDir '$gamePath' -SteamCmdDir '$steamDir' -ScriptId '$($target.ServerId)'
+    Install-GameServer -SteamCmdPath `$exe -AppId '$targetAppId' -InstallDir '$gamePath' -SteamCmdDir '$steamDir' -ScriptId '$($target.ServerId)'
     Update-ServerStatus -ServerId '$($target.ServerId)' -Status 'Installed'
     Write-Host ''
     Write-Host 'Installazione completata con successo.' -ForegroundColor Green
@@ -1131,11 +1141,21 @@ function Invoke-StartServer {
     $gameMode    = $server.ConfiguredGameMode
     $port        = if ($server.FirewallPort) { [int]$server.FirewallPort } else { 27016 }
 
+    # Build launch args from metadata + per-server config (no hardcoded values)
+    $launchCmd = Build-ServerLaunchCommand `
+        -InstallPath $gamePath `
+        -ManagerPath $managerPath `
+        -Game        $server.Game `
+        -Map         $map `
+        -GameMode    $gameMode `
+        -Port        $port
+    $argString = if ($launchCmd) { $launchCmd.Arguments } else { "" }
+
     Write-Host "`n$(Get-Message -Key 'Start_Starting')`n"
 
     try {
         if ($modeChoice -eq "1") {
-            $serverPID = Start-ServerNormal -InstallPath $gamePath -GameMode $gameMode -Map $map -Port $port
+            $serverPID = Start-ServerNormal -InstallPath $gamePath -ArgString $argString
 
             if ($serverPID -is [int] -and $serverPID -gt 0) {
                 $runningFile = Join-Path $managerPath ".running"
@@ -1156,7 +1176,7 @@ function Invoke-StartServer {
 `$host.ui.RawUI.WindowTitle = 'Monitoring: $($server.Name)'
 Import-Module "`$RootPath\modules\server-monitor.psm1" -Force
 Import-Module "`$RootPath\modules\logging.psm1" -Force
-Start-ServerWithMonitoring -InstallPath '$gamePath' -ManagerPath '$managerPath' -GameMode '$gameMode' -Map '$map' -Port $port
+Start-ServerWithMonitoring -InstallPath '$gamePath' -ManagerPath '$managerPath' -ArgString '$argString'
 "@
 
             $process = Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", $monitoringScript -WindowStyle Normal -PassThru
@@ -1920,8 +1940,19 @@ function Invoke-RestartServer {
         return
     }
 
-    $gamePath = Get-GamePath $server
-    $port     = if ($server.FirewallPort) { [int]$server.FirewallPort } else { 27016 }
+    $gamePath    = Get-GamePath    $server
+    $managerPath = Get-ManagerPath $server
+    $port        = if ($server.FirewallPort) { [int]$server.FirewallPort } else { 27016 }
+
+    # Build launch args from metadata + per-server config
+    $restartCmd = Build-ServerLaunchCommand `
+        -InstallPath $gamePath `
+        -ManagerPath $managerPath `
+        -Game        $server.Game `
+        -Map         $fresh.ConfiguredMap `
+        -GameMode    $fresh.ConfiguredGameMode `
+        -Port        $port
+    $restartArgString = if ($restartCmd) { $restartCmd.Arguments } else { "" }
 
     Write-Host ""
     Write-Host "$(Get-Message -Key 'Start_SelectMode'):`n"
@@ -1931,7 +1962,7 @@ function Invoke-RestartServer {
     $modeChoice = Read-Host (Get-Message -Key "Common_Select")
 
     if ($modeChoice -eq "1") {
-        $newPid = Start-ServerNormal -InstallPath $gamePath -GameMode $fresh.ConfiguredGameMode -Map $fresh.ConfiguredMap -Port $port
+        $newPid = Start-ServerNormal -InstallPath $gamePath -ArgString $restartArgString
         if ($newPid -gt 0) {
             @{
                 ServerPath      = $server.Path
@@ -1944,14 +1975,14 @@ function Invoke-RestartServer {
             Write-Host "`n$(Get-Message -Key 'Mod_RestartFailed')`n" -ForegroundColor Red
         }
     } elseif ($modeChoice -eq "2") {
-        $monitoringScript = @"
+        $monitoringScript2 = @"
 `$RootPath = '$RootPath'
 `$host.ui.RawUI.WindowTitle = 'Monitoring: $($server.Name)'
 Import-Module "`$RootPath\modules\server-monitor.psm1" -Force
 Import-Module "`$RootPath\modules\logging.psm1" -Force
-Start-ServerWithMonitoring -InstallPath '$gamePath' -ManagerPath '$managerPath' -GameMode '$($fresh.ConfiguredGameMode)' -Map '$($fresh.ConfiguredMap)' -Port $port
+Start-ServerWithMonitoring -InstallPath '$gamePath' -ManagerPath '$managerPath' -ArgString '$restartArgString'
 "@
-        $process = Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", $monitoringScript -WindowStyle Normal -PassThru
+        $process = Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", $monitoringScript2 -WindowStyle Normal -PassThru
         @{
             ServerPath    = $server.Path
             ServerName    = $server.Name
@@ -2004,7 +2035,9 @@ function Invoke-SetupWizard {
         [PSCustomObject]@{ RconPassword = ""; Notes = "" }
     }
 
-    $cfgFile = Join-Path (Get-GamePath $Server) "left4dead2\cfg\server.cfg"
+    $wizGameMeta  = Get-GameMetadata -Game $Server.Game
+    $wizGameFolder = if ($wizGameMeta -and $wizGameMeta.GameFolder) { $wizGameMeta.GameFolder } else { $Server.Game }
+    $cfgFile = Join-Path (Get-GamePath $Server) "$wizGameFolder\cfg\server.cfg"
     $currentHostname = ""
     $currentSteamGroup = ""
     if (Test-Path $cfgFile) {
@@ -2236,7 +2269,9 @@ function Invoke-ServerSettings {
                 $serverConfig | Add-Member -NotePropertyName RconPassword -NotePropertyValue $pwd -Force
                 $serverConfig | ConvertTo-Json | Set-Content $configPath -Encoding UTF8
 
-                $cfgFile = Join-Path (Get-GamePath $server) "left4dead2\cfg\server.cfg"
+                $srvSettMeta   = Get-GameMetadata -Game $server.Game
+                $srvSettFolder = if ($srvSettMeta -and $srvSettMeta.GameFolder) { $srvSettMeta.GameFolder } else { $server.Game }
+                $cfgFile = Join-Path (Get-GamePath $server) "$srvSettFolder\cfg\server.cfg"
                 if (Test-Path $cfgFile) {
                     Generate-ServerCfg -ServerId $server.ServerId | Out-Null
                 }

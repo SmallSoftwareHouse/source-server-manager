@@ -5,5 +5,6 @@
   "Executable": "srcds.exe",
   "GameFolder": "left4dead2",
   "DefaultGamePort": 27015,
-  "DefaultClientPort": 27005
+  "DefaultClientPort": 27005,
+  "DefaultLaunchArgs": ["-console", "-server", "-nohltv", "+sv_lan 0", "+sv_pure 1", "+exec server.cfg"]
 }

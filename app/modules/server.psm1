@@ -1,14 +1,29 @@
-﻿function Get-ServerDiskStatus {
-    param([string]$Path)
+function Get-ServerDiskStatus {
+    param(
+        [string]$Path,
+        [string]$Game = ""
+    )
 
     if (-not $Path -or -not (Test-Path $Path)) {
         return "Missing"
     }
 
-    # File critici che indicano un'installazione L4D2 completata
+    # Determine game folder from metadata if game type is provided
+    $gameFolder = "left4dead2"  # safe default
+    if ($Game -ne "" -and $global:RootPath) {
+        $metaFile = Join-Path $global:RootPath "games\$Game\metadata.json"
+        if (Test-Path $metaFile) {
+            try {
+                $meta = Get-Content $metaFile -Raw | ConvertFrom-Json
+                if ($meta.GameFolder) { $gameFolder = $meta.GameFolder }
+            } catch { }
+        }
+    }
+
+    # Critical files that indicate a complete server installation
     $criticalFiles = @(
         "srcds.exe",
-        "left4dead2\gameinfo.txt"
+        "$gameFolder\gameinfo.txt"
     )
 
     $found = 0
@@ -25,7 +40,6 @@
         return "Incomplete"
     }
     else {
-        # La cartella esiste ma non ha nessun file del server
         $items = Get-ChildItem $Path -ErrorAction SilentlyContinue
         if (-not $items -or $items.Count -eq 0) {
             return "Empty"
