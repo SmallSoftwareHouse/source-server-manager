@@ -148,6 +148,7 @@
   "Manage_Section_Configuration": "CONFIGURATION",
   "Manage_Section_Management": "MANAGEMENT",
   "Manage_Section_Debug": "DEBUG",
+  "Manage_Diagnostics": "Diagnostics",
 
   "Firewall_Title": "Firewall Management",
   "Firewall_Enabled": "Enable Firewall (open port 27015)",

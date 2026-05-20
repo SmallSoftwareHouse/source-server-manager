@@ -1796,7 +1796,7 @@ function Invoke-ManageServer {
         }
         Write-Host ""
         Write-Host "  --- $(Get-Message -Key 'Manage_Section_Debug') ---" -ForegroundColor DarkGray
-        Write-Host "  D) RCON Diagnostics" -ForegroundColor DarkGray
+        Write-Host "  D) $(Get-Message -Key 'Manage_Diagnostics')" -ForegroundColor DarkGray
         Write-Host ""
         Write-Host "  R) $(Get-Message -Key 'Manage_Refresh')" -ForegroundColor DarkGray
         Write-Host "  0) $(Get-Message -Key 'Manage_Back')"
@@ -1903,49 +1903,121 @@ function Invoke-ManageServer {
                 Show-PlayersMenu -Server $selected
             }
             { $_ -in "D","d" } {
-                Write-Host ""
-                Write-Host "  === RCON DIAGNOSTICS ===" -ForegroundColor Cyan
-                $dbgPort = if ($selected.FirewallPort) { [int]$selected.FirewallPort } else { 27016 }
-                Write-Host "  Server.Path     : $($selected.Path)"
-                Write-Host "  Server.FwPort   : $($selected.FirewallPort) -> using $dbgPort"
-                $dbgCfgFile = Join-Path (Get-ManagerPath $selected) "config.json"
-                Write-Host "  Config file     : $dbgCfgFile"
-                if (Test-Path $dbgCfgFile) {
-                    Write-Host "  Config exists   : YES" -ForegroundColor Green
-                    try {
-                        $dbgCfg = Get-Content $dbgCfgFile -Raw | ConvertFrom-Json
-                        $pwdSet = -not [string]::IsNullOrWhiteSpace($dbgCfg.RconPassword)
-                        Write-Host "  RconPassword    : $(if ($pwdSet) { "SET (len=$($dbgCfg.RconPassword.Length))" } else { "EMPTY" })" -ForegroundColor $(if ($pwdSet) {"Green"} else {"Red"})
-                    } catch { Write-Host "  Config parse err: $_" -ForegroundColor Red }
-                } else {
-                    Write-Host "  Config exists   : NO" -ForegroundColor Red
+                $dgMgr  = Get-ManagerPath $selected
+                $dgGame = Get-GamePath    $selected
+
+                # Helper: print a section header
+                function Write-DiagSection { param([string]$Title)
+                    Write-Host ""
+                    Write-Host "  --- $Title ---" -ForegroundColor Cyan
+                    Write-Host ""
                 }
-                Write-Host ""
-                $dbgAddr = Find-RconAddress -Port $dbgPort
-                Write-Host "  RCON address    : $(if ($dbgAddr) { $dbgAddr } else { 'NOT FOUND' })" -ForegroundColor $(if ($dbgAddr) {"Cyan"} else {"Red"})
-                if ($dbgAddr) {
-                    Write-Host "  TCP connect test to ${dbgAddr}:$dbgPort ..." -ForegroundColor DarkGray
+
+                # Helper: print an aligned key:value line
+                function Write-DiagLine { param([string]$Key, [string]$Value, [string]$Color = "White")
+                    $pad = $Key.PadRight(14)
+                    Write-Host "  $pad : " -NoNewline
+                    Write-Host $Value -ForegroundColor $Color
+                }
+
+                Show-Header
+                Write-Host (Format-SectionTitle (Get-Message -Key "Manage_Diagnostics"))
+
+                # ── [1] SERVER INFO ──────────────────────────────────────────
+                Write-DiagSection "[1] SERVER"
+                Write-DiagLine "Name"   $selected.Name
+                Write-DiagLine "Game"   $selected.Game
+                Write-DiagLine "Path"   $selected.Path
+                $dgDisk = Get-ServerDiskStatus -Path $dgGame -Game $selected.Game
+                $dgDiskColor = if ($dgDisk -eq "Installed") { "Green" } else { "Yellow" }
+                Write-DiagLine "Disk"   $dgDisk $dgDiskColor
+                $dgRunFile = Join-Path $dgMgr ".running"
+                $dgRunning = (Test-Path $dgRunFile)
+                Write-DiagLine "Running" (if ($dgRunning) { "YES" } else { "NO" }) (if ($dgRunning) { "Green" } else { "DarkGray" })
+
+                # ── [2] CONFIG (manager/config.json) ─────────────────────────
+                Write-DiagSection "[2] CONFIG  (manager/config.json)"
+                $dgCfgFile = Join-Path $dgMgr "config.json"
+                if (Test-Path $dgCfgFile) {
+                    Write-Host "  File            : $dgCfgFile" -ForegroundColor DarkGray
                     try {
-                        $dbgTcp = New-Object System.Net.Sockets.TcpClient
-                        $ok = $dbgTcp.ConnectAsync($dbgAddr, $dbgPort).Wait(3000)
-                        if ($dbgTcp.Connected) {
-                            Write-Host "  TCP connect     : OK" -ForegroundColor Green
-                            $dbgTcp.Close()
+                        $dgCfg = Get-Content $dgCfgFile -Raw | ConvertFrom-Json
+                        $dgMeta = Get-GameMetadata -Game $selected.Game
+                        $dgMap  = Resolve-ServerParam -ManagerConfig $dgCfg -Field "Map"     -MetadataDefault ($dgMeta.DefaultMap)      -HardcodedDefault "?"
+                        $dgMode = Resolve-ServerParam -ManagerConfig $dgCfg -Field "GameMode"-MetadataDefault ($dgMeta.DefaultGameMode) -HardcodedDefault "?"
+                        $dgPort = Resolve-ServerParam -ManagerConfig $dgCfg -Field "Port"    -MetadataDefault ($dgMeta.DefaultGamePort) -HardcodedDefault 27016
+                        $dgIpRaw = if ($dgCfg.LaunchIp) { $dgCfg.LaunchIp } else { "(not set)" }
+                        $dgPwdSet = -not [string]::IsNullOrWhiteSpace($dgCfg.RconPassword)
+                        $dgExtra = if ($dgCfg.ExtraArgs -and $dgCfg.ExtraArgs.Count -gt 0) { $dgCfg.ExtraArgs -join " " } else { "(none)" }
+                        Write-DiagLine "Map"      $dgMap
+                        Write-DiagLine "GameMode" $dgMode
+                        Write-DiagLine "Port"     "$dgPort"
+                        Write-DiagLine "LaunchIp" $dgIpRaw
+                        Write-DiagLine "RCON pwd" (if ($dgPwdSet) { "SET (len=$($dgCfg.RconPassword.Length))" } else { "EMPTY" }) (if ($dgPwdSet) { "Green" } else { "Red" })
+                        Write-DiagLine "ExtraArgs" $dgExtra
+                    } catch {
+                        Write-Host "  [ERROR] Cannot parse config.json: $_" -ForegroundColor Red
+                    }
+                } else {
+                    Write-Host "  [--] config.json not found: $dgCfgFile" -ForegroundColor Red
+                }
+
+                # ── [3] LAUNCH COMMAND ───────────────────────────────────────
+                Write-DiagSection "[3] LAUNCH COMMAND"
+                if ($dgDisk -eq "Installed") {
+                    $dgCmd = Build-ServerLaunchCommand `
+                        -InstallPath $dgGame `
+                        -ManagerPath $dgMgr `
+                        -Game        $selected.Game
+                    if ($dgCmd) {
+                        Write-Host "  Executable      : $($dgCmd.Executable)" -ForegroundColor DarkGray
+                        Write-Host ""
+                        Write-Host "  Arguments:" -ForegroundColor DarkGray
+                        foreach ($a in $dgCmd.ArgsArray) {
+                            Write-Host "    $a" -ForegroundColor White
+                        }
+                        Write-Host ""
+                        Write-Host "  Full command line:" -ForegroundColor DarkGray
+                        Write-Host "  `"$($dgCmd.Executable)`" $($dgCmd.Arguments)" -ForegroundColor Yellow
+                    } else {
+                        Write-Host "  [!!] Could not build launch command (check config and metadata)" -ForegroundColor Yellow
+                    }
+                } else {
+                    Write-Host "  [--] Server not installed — launch command not available" -ForegroundColor DarkGray
+                }
+
+                # ── [4] RCON ─────────────────────────────────────────────────
+                Write-DiagSection "[4] RCON"
+                $dgRconPort = if ($dgCfg -and $dgCfg.Port) { [int]$dgCfg.Port } else { 27016 }
+                $dgAddr = Find-RconAddress -Port $dgRconPort
+                Write-DiagLine "Address" (if ($dgAddr) { "$dgAddr`:$dgRconPort" } else { "NOT FOUND" }) (if ($dgAddr) { "Cyan" } else { "Red" })
+                if ($dgAddr) {
+                    try {
+                        $dgTcp = New-Object System.Net.Sockets.TcpClient
+                        $dgOk  = $dgTcp.ConnectAsync($dgAddr, $dgRconPort).Wait(3000)
+                        if ($dgTcp.Connected) {
+                            Write-DiagLine "TCP test" "OK" "Green"
+                            $dgTcp.Close()
                         } else {
-                            Write-Host "  TCP connect     : FAILED (timeout)" -ForegroundColor Red
+                            Write-DiagLine "TCP test" "FAILED (timeout)" "Red"
                         }
                     } catch {
-                        Write-Host "  TCP connect     : FAILED ($_)" -ForegroundColor Red
+                        Write-DiagLine "TCP test" "FAILED ($_)" "Red"
                     }
                 }
-                Write-Host ""
-                Write-Host "  Checking listening ports for srcds..." -ForegroundColor DarkGray
-                $tcpConns = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -gt 27000 -and $_.LocalPort -lt 27100 }
-                if ($tcpConns) {
-                    foreach ($c in $tcpConns) { Write-Host "  TCP Listen      : $($c.LocalAddress):$($c.LocalPort) (PID $($c.OwningProcess))" -ForegroundColor Cyan }
+
+                # ── [5] NETWORK ──────────────────────────────────────────────
+                Write-DiagSection "[5] NETWORK  (listening ports 27000-27100)"
+                $dgTcpConns = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+                    Where-Object { $_.LocalPort -gt 27000 -and $_.LocalPort -lt 27100 }
+                if ($dgTcpConns) {
+                    foreach ($c in $dgTcpConns) {
+                        Write-Host "  TCP $($c.LocalAddress):$($c.LocalPort)  (PID $($c.OwningProcess))" -ForegroundColor Cyan
+                    }
                 } else {
-                    Write-Host "  TCP Listen      : no ports 27000-27100 found" -ForegroundColor Yellow
+                    Write-Host "  (no ports in range 27000-27100 found)" -ForegroundColor DarkGray
                 }
+
                 Write-Host ""
                 Read-Host (Get-Message -Key "Common_PressEnter")
             }
