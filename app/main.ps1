@@ -2014,11 +2014,31 @@ function Invoke-ManageServer {
 
                 # ── [5] NETWORK ──────────────────────────────────────────────
                 Write-DiagSection "[5] NETWORK  (listening ports 27000-27100)"
+
+                # Read server PID from .running if available
+                $dgServerPid = 0
+                if (Test-Path $dgRunFile) {
+                    try {
+                        $dgRunData  = Get-Content $dgRunFile -Raw | ConvertFrom-Json
+                        $dgServerPid = if ($dgRunData.ServerProcessId) { [int]$dgRunData.ServerProcessId } else { 0 }
+                    } catch { }
+                }
+
                 $dgTcpConns = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
                     Where-Object { $_.LocalPort -gt 27000 -and $_.LocalPort -lt 27100 }
+
                 if ($dgTcpConns) {
                     foreach ($c in $dgTcpConns) {
-                        Write-Host "  TCP $($c.LocalAddress):$($c.LocalPort)  (PID $($c.OwningProcess))" -ForegroundColor Cyan
+                        # Resolve process name from PID
+                        $dgProc = Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue
+                        $dgProcName = if ($dgProc) { $dgProc.ProcessName } else { "?" }
+
+                        # Highlight if it matches the running server PID
+                        $dgIsServer = ($dgServerPid -gt 0 -and $c.OwningProcess -eq $dgServerPid)
+                        $dgLineColor = if ($dgIsServer) { "Green" } else { "DarkGray" }
+                        $dgTag = if ($dgIsServer) { "  <- srcds (our server)" } else { "" }
+
+                        Write-Host ("  {0,-22} PID {1,-6} [{2}]{3}" -f "$($c.LocalAddress):$($c.LocalPort)", $c.OwningProcess, $dgProcName, $dgTag) -ForegroundColor $dgLineColor
                     }
                 } else {
                     Write-Host "  (no ports in range 27000-27100 found)" -ForegroundColor DarkGray
