@@ -181,7 +181,30 @@ function Initialize-ServerConfiguration {
         return $false
     }
 
-    $cfgResult = Generate-ServerCfg -ServerId $ServerId
+    # Write Map, GameMode (and Port if not already set) to manager/config.json
+    $managerPath   = Join-Path $server.Path "manager"
+    $managerCfgPath = Join-Path $managerPath "config.json"
+    $managerCfg = if (Test-Path $managerCfgPath) {
+        try { Get-Content $managerCfgPath -Raw | ConvertFrom-Json } catch { [PSCustomObject]@{} }
+    } else { [PSCustomObject]@{} }
+
+    $managerCfg | Add-Member -NotePropertyName "Map"      -NotePropertyValue $config.Map      -Force
+    $managerCfg | Add-Member -NotePropertyName "GameMode" -NotePropertyValue $config.GameMode -Force
+
+    # Set Port from metadata default if not already configured
+    if (-not (Get-Member -InputObject $managerCfg -Name "Port" -MemberType NoteProperty) -or -not $managerCfg.Port) {
+        $metaFile = Join-Path $RootPath "games\$($server.Game)\metadata.json"
+        $defaultPort = 27016
+        if (Test-Path $metaFile) {
+            try { $defaultPort = (Get-Content $metaFile -Raw | ConvertFrom-Json).DefaultGamePort } catch { }
+        }
+        $managerCfg | Add-Member -NotePropertyName "Port" -NotePropertyValue $defaultPort -Force
+    }
+
+    $managerCfg | ConvertTo-Json | Set-Content $managerCfgPath -Encoding UTF8
+    Write-Log "manager/config.json updated - Map: $($config.Map), GameMode: $($config.GameMode)" "INFO"
+
+    $cfgResult    = Generate-ServerCfg    -ServerId $ServerId
     $markerResult = Generate-ServerMarker -ServerId $ServerId
 
     if (-not $cfgResult -or -not $markerResult) {
@@ -189,15 +212,11 @@ function Initialize-ServerConfiguration {
         return $false
     }
 
-    $batchPath   = Join-Path (Join-Path $server.Path "manager") "start_server.bat"
-    $serverPort  = if ($server.FirewallPort) { [int]$server.FirewallPort } else { 27016 }
+    $batchPath    = Join-Path $managerPath "start_server.bat"
     $launchResult = Get-ServerLaunchBatch `
         -InstallPath (Join-Path $server.Path "server") `
-        -ManagerPath (Join-Path $server.Path "manager") `
+        -ManagerPath $managerPath `
         -Game        $server.Game `
-        -GameMode    $config.GameMode `
-        -Map         $config.Map `
-        -Port        $serverPort `
         -OutputPath  $batchPath
 
     if (-not $launchResult) {
@@ -209,7 +228,7 @@ function Initialize-ServerConfiguration {
     foreach ($s in $registry) {
         if ($s.ServerId -eq $ServerId) {
             $s.Status = "Installed"
-            $s | Add-Member -NotePropertyName "ConfiguredMap" -NotePropertyValue $config.Map -Force
+            $s | Add-Member -NotePropertyName "ConfiguredMap"      -NotePropertyValue $config.Map      -Force
             $s | Add-Member -NotePropertyName "ConfiguredGameMode" -NotePropertyValue $config.GameMode -Force
             $s.LastUpdate = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
         }
@@ -246,6 +265,26 @@ function Update-ServerMapAndGameMode {
         return $false
     }
 
+    # Update Map and GameMode in manager/config.json
+    $managerPath2    = Join-Path $server.Path "manager"
+    $managerCfgPath2 = Join-Path $managerPath2 "config.json"
+    $managerCfg2 = if (Test-Path $managerCfgPath2) {
+        try { Get-Content $managerCfgPath2 -Raw | ConvertFrom-Json } catch { [PSCustomObject]@{} }
+    } else { [PSCustomObject]@{} }
+
+    $managerCfg2 | Add-Member -NotePropertyName "Map"      -NotePropertyValue $config.Map      -Force
+    $managerCfg2 | Add-Member -NotePropertyName "GameMode" -NotePropertyValue $config.GameMode -Force
+    $managerCfg2 | ConvertTo-Json | Set-Content $managerCfgPath2 -Encoding UTF8
+    Write-Log "manager/config.json updated - Map: $($config.Map), GameMode: $($config.GameMode)" "INFO"
+
+    # Regenerate start_server.bat with new values
+    $batchPath2 = Join-Path $managerPath2 "start_server.bat"
+    Get-ServerLaunchBatch `
+        -InstallPath (Join-Path $server.Path "server") `
+        -ManagerPath $managerPath2 `
+        -Game        $server.Game `
+        -OutputPath  $batchPath2 | Out-Null
+
     $cfgResult = Generate-ServerCfg -ServerId $ServerId
 
     if (-not $cfgResult) {
@@ -256,7 +295,7 @@ function Update-ServerMapAndGameMode {
     $registry = @(Get-ServerRegistry)
     foreach ($s in $registry) {
         if ($s.ServerId -eq $ServerId) {
-            $s | Add-Member -NotePropertyName "ConfiguredMap" -NotePropertyValue $config.Map -Force
+            $s | Add-Member -NotePropertyName "ConfiguredMap"      -NotePropertyValue $config.Map      -Force
             $s | Add-Member -NotePropertyName "ConfiguredGameMode" -NotePropertyValue $config.GameMode -Force
             $s.LastUpdate = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
         }

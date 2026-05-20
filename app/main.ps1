@@ -1137,18 +1137,12 @@ function Invoke-StartServer {
 
     $gamePath    = Get-GamePath    $server
     $managerPath = Get-ManagerPath $server
-    $map         = $server.ConfiguredMap
-    $gameMode    = $server.ConfiguredGameMode
-    $port        = if ($server.FirewallPort) { [int]$server.FirewallPort } else { 27016 }
 
-    # Build launch args from metadata + per-server config (no hardcoded values)
+    # All launch params (map, gamemode, port) come from manager/config.json -> metadata defaults
     $launchCmd = Build-ServerLaunchCommand `
         -InstallPath $gamePath `
         -ManagerPath $managerPath `
-        -Game        $server.Game `
-        -Map         $map `
-        -GameMode    $gameMode `
-        -Port        $port
+        -Game        $server.Game
     $argString = if ($launchCmd) { $launchCmd.Arguments } else { "" }
 
     Write-Host "`n$(Get-Message -Key 'Start_Starting')`n"
@@ -1942,16 +1936,12 @@ function Invoke-RestartServer {
 
     $gamePath    = Get-GamePath    $server
     $managerPath = Get-ManagerPath $server
-    $port        = if ($server.FirewallPort) { [int]$server.FirewallPort } else { 27016 }
 
-    # Build launch args from metadata + per-server config
+    # All launch params come from manager/config.json -> metadata defaults
     $restartCmd = Build-ServerLaunchCommand `
         -InstallPath $gamePath `
         -ManagerPath $managerPath `
-        -Game        $server.Game `
-        -Map         $fresh.ConfiguredMap `
-        -GameMode    $fresh.ConfiguredGameMode `
-        -Port        $port
+        -Game        $server.Game
     $restartArgString = if ($restartCmd) { $restartCmd.Arguments } else { "" }
 
     Write-Host ""

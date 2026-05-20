@@ -4,7 +4,10 @@
   "SteamAppId": 222860,
   "Executable": "srcds.exe",
   "GameFolder": "left4dead2",
+  "GameId": "left4dead2",
   "DefaultGamePort": 27016,
   "DefaultClientPort": 27005,
+  "DefaultMap": "c1m4_atrium",
+  "DefaultGameMode": "survival",
   "DefaultLaunchArgs": ["-console"]
 }

@@ -35,81 +35,91 @@ function Get-GameMetadata {
 
 function Get-ServerManagerConfig {
     param([string]$ManagerPath)
-    $defaults = [PSCustomObject]@{ RconPassword = ""; Notes = ""; LaunchIp = ""; ExtraArgs = @() }
     $path = Join-Path $ManagerPath "config.json"
-    if (-not (Test-Path $path)) { return $defaults }
+    if (-not (Test-Path $path)) { return $null }
     try {
-        $mc = Get-Content $path -Raw | ConvertFrom-Json
-        # Fill any missing fields with defaults
-        if (-not (Get-Member -InputObject $mc -Name "LaunchIp"  -MemberType NoteProperty)) {
-            $mc | Add-Member -NotePropertyName "LaunchIp"  -NotePropertyValue "" -Force
-        }
-        if (-not (Get-Member -InputObject $mc -Name "ExtraArgs" -MemberType NoteProperty)) {
-            $mc | Add-Member -NotePropertyName "ExtraArgs" -NotePropertyValue @() -Force
-        }
-        return $mc
+        return Get-Content $path -Raw | ConvertFrom-Json
     }
     catch {
         Write-Log "Failed to read manager config: $_" "WARNING"
-        return $defaults
+        return $null
     }
+}
+
+# Read a single value from manager config, fallback to metadata default, then to hardcoded fallback
+function Resolve-ServerParam {
+    param(
+        $ManagerConfig,
+        [string]$Field,
+        $MetadataDefault,
+        $HardcodedDefault
+    )
+    if ($ManagerConfig -and (Get-Member -InputObject $ManagerConfig -Name $Field -MemberType NoteProperty)) {
+        $val = $ManagerConfig.$Field
+        if ($val -ne $null -and "$val" -ne "") { return $val }
+    }
+    if ($MetadataDefault -ne $null -and "$MetadataDefault" -ne "") { return $MetadataDefault }
+    return $HardcodedDefault
 }
 
 function Build-LaunchArgs {
     param(
         $Metadata,
-        $ManagerConfig,
-        [string]$Map,
-        [string]$GameMode,
-        [int]$Port
+        $ManagerConfig
     )
 
-    $args = [System.Collections.Generic.List[string]]::new()
+    $argList = [System.Collections.Generic.List[string]]::new()
 
-    # -game <folder> from metadata
-    $args.Add("-game $($Metadata.GameFolder)")
-
-    # Fixed args defined per-game in metadata
+    # Fixed args per game (e.g. -console)
     if ($Metadata.DefaultLaunchArgs) {
-        foreach ($a in $Metadata.DefaultLaunchArgs) { $args.Add($a) }
+        foreach ($a in $Metadata.DefaultLaunchArgs) { $argList.Add($a) }
     }
 
-    # Map and game mode
-    if ($Map)      { $args.Add("+map $Map") }
-    if ($GameMode) { $args.Add("+mp_gamemode $GameMode") }
+    # -game uses GameId (the Source Engine game identifier)
+    $gameId = if ($Metadata.GameId) { $Metadata.GameId } else { $Metadata.GameFolder }
+    $argList.Add("-game $gameId")
 
-    # Port
-    if ($Port -gt 0) { $args.Add("-port $Port") }
+    # Map: config.json -> metadata default -> "c1m4_atrium"
+    $map = Resolve-ServerParam -ManagerConfig $ManagerConfig -Field "Map" `
+        -MetadataDefault $Metadata.DefaultMap -HardcodedDefault "c1m4_atrium"
+    $argList.Add("+map $map")
 
-    # IP binding
+    # GameMode: config.json -> metadata default -> "coop"
+    $gameMode = Resolve-ServerParam -ManagerConfig $ManagerConfig -Field "GameMode" `
+        -MetadataDefault $Metadata.DefaultGameMode -HardcodedDefault "coop"
+    $argList.Add("+mp_gamemode $gameMode")
+
+    # Port: config.json -> metadata default -> 27016
+    $port = [int](Resolve-ServerParam -ManagerConfig $ManagerConfig -Field "Port" `
+        -MetadataDefault $Metadata.DefaultGamePort -HardcodedDefault 27016)
+    $argList.Add("-port $port")
+
+    # IP binding: config.json LaunchIp -> skip if empty
     $ip = if ($ManagerConfig -and $ManagerConfig.LaunchIp) { $ManagerConfig.LaunchIp } else { "" }
     if ($ip -eq "auto") {
         $detected = Get-PreferredLocalIP
         if ($detected) {
-            $args.Add("-ip $detected")
+            $argList.Add("-ip $detected")
             Write-Log "Auto-detected IP for server binding: $detected" "INFO"
         }
     }
     elseif ($ip -ne "") {
-        $args.Add("-ip $ip")
+        $argList.Add("-ip $ip")
     }
 
-    # Extra args from server-specific config
+    # Extra args: config.json ExtraArgs array
     if ($ManagerConfig -and $ManagerConfig.ExtraArgs) {
-        foreach ($a in $ManagerConfig.ExtraArgs) { $args.Add($a) }
+        foreach ($a in $ManagerConfig.ExtraArgs) { $argList.Add($a) }
     }
 
-    return $args.ToArray()
+    return $argList.ToArray()
 }
 
 function Build-ServerLaunchCommand {
     param(
         [string]$InstallPath,
         [string]$ManagerPath,
-        [string]$Game,
-        [string]$Map,
-        [string]$GameMode,
-        [int]$Port = 27015
+        [string]$Game
     )
 
     $metadata      = Get-GameMetadata       -Game $Game
@@ -124,20 +134,20 @@ function Build-ServerLaunchCommand {
         return $null
     }
 
-    $launchArgs = Build-LaunchArgs `
-        -Metadata      $metadata `
-        -ManagerConfig $managerConfig `
-        -Map           $Map `
-        -GameMode      $GameMode `
-        -Port          $Port
+    $launchArgs = Build-LaunchArgs -Metadata $metadata -ManagerConfig $managerConfig
+
+    # Read effective values for reference (callers may need them)
+    $effectiveMap      = Resolve-ServerParam -ManagerConfig $managerConfig -Field "Map"      -MetadataDefault $metadata.DefaultMap      -HardcodedDefault "c1m4_atrium"
+    $effectiveGameMode = Resolve-ServerParam -ManagerConfig $managerConfig -Field "GameMode" -MetadataDefault $metadata.DefaultGameMode -HardcodedDefault "coop"
+    $effectivePort     = [int](Resolve-ServerParam -ManagerConfig $managerConfig -Field "Port" -MetadataDefault $metadata.DefaultGamePort -HardcodedDefault 27016)
 
     return @{
         Executable = $srcdsPath
         Arguments  = $launchArgs -join " "
         ArgsArray  = $launchArgs
-        Map        = $Map
-        GameMode   = $GameMode
-        Port       = $Port
+        Map        = $effectiveMap
+        GameMode   = $effectiveGameMode
+        Port       = $effectivePort
     }
 }
 
@@ -146,30 +156,21 @@ function Get-ServerLaunchBatch {
         [string]$InstallPath,
         [string]$ManagerPath,
         [string]$Game,
-        [string]$GameMode,
-        [string]$Map,
-        [int]$Port = 27015,
         [string]$OutputPath
     )
 
-    $cmd = Build-ServerLaunchCommand `
-        -InstallPath $InstallPath `
-        -ManagerPath $ManagerPath `
-        -Game        $Game `
-        -GameMode    $GameMode `
-        -Map         $Map `
-        -Port        $Port
+    $cmd = Build-ServerLaunchCommand -InstallPath $InstallPath -ManagerPath $ManagerPath -Game $Game
 
     if (-not $cmd) { return $false }
 
     $serverDir = Split-Path $cmd.Executable -Parent
 
-    $batchContent = "@echo off`r`n"
+    $batchContent  = "@echo off`r`n"
     $batchContent += "REM Generated by Source Server Manager`r`n"
     $batchContent += "REM Game: $Game`r`n"
-    $batchContent += "REM GameMode: $GameMode`r`n"
-    $batchContent += "REM Map: $Map`r`n"
-    $batchContent += "REM Port: $Port`r`n"
+    $batchContent += "REM Map: $($cmd.Map)`r`n"
+    $batchContent += "REM GameMode: $($cmd.GameMode)`r`n"
+    $batchContent += "REM Port: $($cmd.Port)`r`n"
     $batchContent += "`r`n"
     $batchContent += "cd /d `"$serverDir`"`r`n"
     $batchContent += "`r`n"
@@ -188,4 +189,5 @@ Export-ModuleMember -Function `
     Build-LaunchArgs, `
     Get-GameMetadata, `
     Get-ServerManagerConfig, `
-    Get-PreferredLocalIP
+    Get-PreferredLocalIP, `
+    Resolve-ServerParam
