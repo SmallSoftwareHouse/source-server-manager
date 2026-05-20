@@ -307,4 +307,4 @@ function Update-ServerMapAndGameMode {
     return $true
 }
 
-Export-ModuleMember -Function Generate-ServerCfg, Generate-ServerMarker, Initialize-ServerConfiguration, Update-ServerMapAndGameMode
+Export-ModuleMember -Function Generate-ServerCfg, Generate-ServerMarker, Initialize-ServerConfiguration, Update-ServerMapAndGameMode, Select-ServerMapAndGameMode

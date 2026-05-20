@@ -2254,10 +2254,30 @@ function Invoke-ServerSettings {
         New-Item -ItemType Directory -Path $managerPath -Force | Out-Null
     }
 
-    $serverConfig = if (Test-Path $configPath) {
-        Get-Content $configPath -Raw | ConvertFrom-Json
-    } else {
-        [PSCustomObject]@{ RconPassword = ""; Notes = "" }
+    $sc = if (Test-Path $configPath) {
+        try { Get-Content $configPath -Raw | ConvertFrom-Json }
+        catch { [PSCustomObject]@{} }
+    } else { [PSCustomObject]@{} }
+
+    # Helper: save config and regenerate bat
+    function Save-ServerConfig {
+        $sc | ConvertTo-Json | Set-Content $configPath -Encoding UTF8
+
+        # Regenerate start_server.bat
+        $batchPath = Join-Path $managerPath "start_server.bat"
+        Get-ServerLaunchBatch `
+            -InstallPath (Get-GamePath $server) `
+            -ManagerPath $managerPath `
+            -Game        $server.Game `
+            -OutputPath  $batchPath | Out-Null
+
+        # Regenerate server.cfg if RCON changed
+        $srvMeta   = Get-GameMetadata -Game $server.Game
+        $srvFolder = if ($srvMeta -and $srvMeta.GameFolder) { $srvMeta.GameFolder } else { $server.Game }
+        $cfgFile   = Join-Path (Get-GamePath $server) "$srvFolder\cfg\server.cfg"
+        if (Test-Path $cfgFile) {
+            Generate-ServerCfg -ServerId $server.ServerId | Out-Null
+        }
     }
 
     while ($true) {
@@ -2265,36 +2285,136 @@ function Invoke-ServerSettings {
         Write-Host (Format-SectionTitle (Get-Message -Key "SrvSettings_Title" -MsgArgs @($server.Name)))
         Write-Host ""
 
-        $rconDisplay = if ([string]::IsNullOrWhiteSpace($serverConfig.RconPassword)) {
-            "[--] $(Get-Message -Key 'SrvSettings_NotSet')"
-        } else {
-            "[OK] ***"
-        }
+        # Display current values with fallback to metadata defaults
+        $meta = Get-GameMetadata -Game $server.Game
+
+        $rconDisplay = if ([string]::IsNullOrWhiteSpace($sc.RconPassword)) {
+            "[--] $(Get-Message -Key 'SrvSettings_NotSet')" } else { "[OK] ***" }
+
+        $portVal = Resolve-ServerParam -ManagerConfig $sc -Field "Port" `
+            -MetadataDefault ($meta.DefaultGamePort) -HardcodedDefault 27016
+        $mapVal = Resolve-ServerParam -ManagerConfig $sc -Field "Map" `
+            -MetadataDefault ($meta.DefaultMap) -HardcodedDefault "c1m4_atrium"
+        $modeVal = Resolve-ServerParam -ManagerConfig $sc -Field "GameMode" `
+            -MetadataDefault ($meta.DefaultGameMode) -HardcodedDefault "coop"
+        $ipVal = if ($sc.LaunchIp) { $sc.LaunchIp } else { "($(Get-Message -Key 'SrvSettings_NotSet'))" }
+        $extraVal = if ($sc.ExtraArgs -and $sc.ExtraArgs.Count -gt 0) {
+            $sc.ExtraArgs -join " " } else { "($(Get-Message -Key 'SrvSettings_NotSet'))" }
 
         Write-Host "  1) $(Get-Message -Key 'SrvSettings_RconPassword'): $rconDisplay"
+        Write-Host "  2) $(Get-Message -Key 'SrvSettings_Port'): $portVal"
+        Write-Host "  3) $(Get-Message -Key 'SrvSettings_Map'): $mapVal"
+        Write-Host "  4) $(Get-Message -Key 'SrvSettings_GameMode'): $modeVal"
+        Write-Host "  5) $(Get-Message -Key 'SrvSettings_IpBinding'): $ipVal"
+        Write-Host "  6) $(Get-Message -Key 'SrvSettings_ExtraArgs'): $extraVal"
         Write-Host "  0) $(Get-Message -Key 'Manage_Back')"
         Write-Host ""
 
         $action = Read-Host (Get-Message -Key "Common_Select")
 
         switch ($action) {
+
             "1" {
                 Write-Host ""
                 $pwd = Read-Host (Get-Message -Key "SrvSettings_RconPrompt")
-                $serverConfig | Add-Member -NotePropertyName RconPassword -NotePropertyValue $pwd -Force
-                $serverConfig | ConvertTo-Json | Set-Content $configPath -Encoding UTF8
-
-                $srvSettMeta   = Get-GameMetadata -Game $server.Game
-                $srvSettFolder = if ($srvSettMeta -and $srvSettMeta.GameFolder) { $srvSettMeta.GameFolder } else { $server.Game }
-                $cfgFile = Join-Path (Get-GamePath $server) "$srvSettFolder\cfg\server.cfg"
-                if (Test-Path $cfgFile) {
-                    Generate-ServerCfg -ServerId $server.ServerId | Out-Null
-                }
-
+                $sc | Add-Member -NotePropertyName RconPassword -NotePropertyValue $pwd -Force
+                Save-ServerConfig
                 Write-Host "`n$(Get-Message -Key 'SrvSettings_Saved')`n" -ForegroundColor Green
                 Start-Sleep -Seconds 1
             }
+
+            "2" {
+                Write-Host ""
+                $input = Read-Host (Get-Message -Key "SrvSettings_PortPrompt")
+                $newPort = 0
+                if ([int]::TryParse($input, [ref]$newPort) -and $newPort -ge 1024 -and $newPort -le 65535) {
+                    $sc | Add-Member -NotePropertyName Port -NotePropertyValue $newPort -Force
+                    Save-ServerConfig
+                    Write-Host "`n$(Get-Message -Key 'SrvSettings_Saved')`n" -ForegroundColor Green
+                } else {
+                    Write-Host "`n$(Get-Message -Key 'SrvSettings_PortInvalid')`n" -ForegroundColor Red
+                }
+                Start-Sleep -Seconds 1
+            }
+
+            "3" {
+                $sel = Select-ServerMapAndGameMode -GameType $server.Game
+                if ($sel) {
+                    $sc | Add-Member -NotePropertyName Map      -NotePropertyValue $sel.Map      -Force
+                    $sc | Add-Member -NotePropertyName GameMode -NotePropertyValue $sel.GameMode -Force
+                    # Keep registry in sync for display
+                    $reg = @(Get-ServerRegistry)
+                    foreach ($s in $reg) {
+                        if ($s.ServerId -eq $server.ServerId) {
+                            $s | Add-Member -NotePropertyName ConfiguredMap      -NotePropertyValue $sel.Map      -Force
+                            $s | Add-Member -NotePropertyName ConfiguredGameMode -NotePropertyValue $sel.GameMode -Force
+                        }
+                    }
+                    Save-ServerRegistry $reg
+                    Save-ServerConfig
+                    Write-Host "`n$(Get-Message -Key 'SrvSettings_Saved')`n" -ForegroundColor Green
+                    Start-Sleep -Seconds 1
+                }
+            }
+
+            "4" {
+                # Game mode only
+                $gamesDir     = Join-Path $RootPath "games\$($server.Game)\configs"
+                $gamemodesFile = Join-Path $gamesDir "gamemodes.json"
+                if (Test-Path $gamemodesFile) {
+                    $gamemodes = @(Get-Content $gamemodesFile -Raw | ConvertFrom-Json)
+                    Write-Host ""
+                    for ($i = 0; $i -lt $gamemodes.Count; $i++) {
+                        Write-Host "  $($i+1)) $($gamemodes[$i].name) - $($gamemodes[$i].description)"
+                    }
+                    Write-Host ""
+                    $gmSel = Read-Host (Get-Message -Key "Common_SelectNumber")
+                    $gmIdx = [int]$gmSel - 1
+                    if ($gmIdx -ge 0 -and $gmIdx -lt $gamemodes.Count) {
+                        $sc | Add-Member -NotePropertyName GameMode -NotePropertyValue $gamemodes[$gmIdx].id -Force
+                        $reg = @(Get-ServerRegistry)
+                        foreach ($s in $reg) {
+                            if ($s.ServerId -eq $server.ServerId) {
+                                $s | Add-Member -NotePropertyName ConfiguredGameMode -NotePropertyValue $gamemodes[$gmIdx].id -Force
+                            }
+                        }
+                        Save-ServerRegistry $reg
+                        Save-ServerConfig
+                        Write-Host "`n$(Get-Message -Key 'SrvSettings_Saved')`n" -ForegroundColor Green
+                    } else {
+                        Write-Host "`n$(Get-Message -Key 'Common_InvalidSelection')`n" -ForegroundColor Red
+                    }
+                    Start-Sleep -Seconds 1
+                }
+            }
+
+            "5" {
+                Write-Host ""
+                $newIp = (Read-Host (Get-Message -Key "SrvSettings_IpPrompt")).Trim()
+                $sc | Add-Member -NotePropertyName LaunchIp -NotePropertyValue $newIp -Force
+                Save-ServerConfig
+                Write-Host "`n$(Get-Message -Key 'SrvSettings_Saved')`n" -ForegroundColor Green
+                Start-Sleep -Seconds 1
+            }
+
+            "6" {
+                Write-Host ""
+                $curExtra = if ($sc.ExtraArgs -and $sc.ExtraArgs.Count -gt 0) { $sc.ExtraArgs -join " " } else { "" }
+                Write-Host "  $(Get-Message -Key 'SrvSettings_ExtraArgsCurrent'): $curExtra" -ForegroundColor DarkGray
+                Write-Host ""
+                $newExtra = (Read-Host (Get-Message -Key "SrvSettings_ExtraArgsPrompt")).Trim()
+                $extraArray = if ([string]::IsNullOrWhiteSpace($newExtra)) { @() } else {
+                    # Split preserving quoted groups (e.g. +exec "my file.cfg")
+                    $newExtra -split '\s+(?=(?:[^"]*"[^"]*")*[^"]*$)'
+                }
+                $sc | Add-Member -NotePropertyName ExtraArgs -NotePropertyValue $extraArray -Force
+                Save-ServerConfig
+                Write-Host "`n$(Get-Message -Key 'SrvSettings_Saved')`n" -ForegroundColor Green
+                Start-Sleep -Seconds 1
+            }
+
             "0" { return }
+
             default {
                 Write-Host "`n$(Get-Message -Key 'Common_InvalidOption')`n" -ForegroundColor Yellow
                 Start-Sleep -Seconds 1
