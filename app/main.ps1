@@ -608,7 +608,32 @@ function Start-ServerInstall {
 
     $managerConfigFile = Join-Path $managerPath "config.json"
     if (-not (Test-Path $managerConfigFile)) {
-        @{ RconPassword = ""; Notes = ""; LaunchIp = ""; ExtraArgs = @() } | ConvertTo-Json | Set-Content $managerConfigFile -Encoding UTF8
+        # Auto-assign first available port starting from 27016
+        $assignedPort = Get-NextServerPort -BasePort 27016
+
+        # Read game metadata defaults for map/gamemode
+        $initMetaFile = Join-Path $RootPath "games\$($target.Game)\metadata.json"
+        $initDefaultMap     = "c1m4_atrium"
+        $initDefaultMode    = "coop"
+        if (Test-Path $initMetaFile) {
+            try {
+                $initMeta = Get-Content $initMetaFile -Raw | ConvertFrom-Json
+                if ($initMeta.DefaultMap)      { $initDefaultMap  = $initMeta.DefaultMap }
+                if ($initMeta.DefaultGameMode) { $initDefaultMode = $initMeta.DefaultGameMode }
+            } catch { }
+        }
+
+        @{
+            RconPassword = ""
+            Notes        = ""
+            Port         = $assignedPort
+            Map          = $initDefaultMap
+            GameMode     = $initDefaultMode
+            LaunchIp     = "auto"
+            ExtraArgs    = @()
+        } | ConvertTo-Json | Set-Content $managerConfigFile -Encoding UTF8
+
+        Write-Log "Created manager config for $($target.Name) - Port: $assignedPort" "INFO"
     }
 
     $steamDir = Join-Path $RootPath "downloads\steamcmd"

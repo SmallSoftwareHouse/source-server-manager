@@ -1,3 +1,27 @@
+function Get-NextServerPort {
+    # Returns the first port >= BasePort not already used by any registered server
+    param([int]$BasePort = 27016)
+
+    $usedPorts = [System.Collections.Generic.HashSet[int]]::new()
+
+    $servers = @(Get-ServerRegistry)
+    foreach ($s in $servers) {
+        $managerCfgPath = Join-Path (Join-Path $s.Path "manager") "config.json"
+        if (Test-Path $managerCfgPath) {
+            try {
+                $mc = Get-Content $managerCfgPath -Raw | ConvertFrom-Json
+                if ($mc.Port -and [int]$mc.Port -gt 0) {
+                    $usedPorts.Add([int]$mc.Port) | Out-Null
+                }
+            } catch { }
+        }
+    }
+
+    $port = $BasePort
+    while ($usedPorts.Contains($port)) { $port++ }
+    return $port
+}
+
 function Get-PreferredLocalIP {
     # Return the IP of the adapter that has a default gateway, excluding virtual adapters
     try {
@@ -190,4 +214,5 @@ Export-ModuleMember -Function `
     Get-GameMetadata, `
     Get-ServerManagerConfig, `
     Get-PreferredLocalIP, `
+    Get-NextServerPort, `
     Resolve-ServerParam
