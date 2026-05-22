@@ -122,9 +122,9 @@ function Select-FolderInteractive {
             if ($hasDefault) {
                 $defDrv    = $allDrives | Where-Object { $_.DeviceID -eq $DefaultInstallRoot.Substring(0,2) } | Select-Object -First 1
                 $defFreeGB = if ($defDrv) { [math]::Round($defDrv.FreeSpace / 1GB, 1) } else { -1 }
-                $defSuffix = Get-SpaceSuffix -GB $defFreeGB
                 $defColor  = Get-SpaceColor  -GB $defFreeGB
-                $options  += [PSCustomObject]@{ Type = "default"; Label = $DefaultInstallRoot; Suffix = "  [$(Get-Message -Key 'Browse_DefaultFolder')$defSuffix]"; Color = $defColor }
+                $defGB     = if ($defFreeGB -ge 0) { "${defFreeGB}GB" } else { "" }
+                $options  += [PSCustomObject]@{ Type = "default"; Label = $DefaultInstallRoot; Suffix = "  [$(Get-Message -Key 'Browse_DefaultFolder')$defGB]"; Color = $defColor }
             }
             foreach ($drv in $allDrives) {
                 $letter = $drv.DeviceID

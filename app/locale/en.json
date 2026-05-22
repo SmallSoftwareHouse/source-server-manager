@@ -75,7 +75,7 @@
   "Setup_ServerFolderTip2": "  Avoid paths inside Program Files, Desktop or system folders.",
   "Setup_ServerFolderTip3": "  E.g.: C:\\GameServers   D:\\L4D2Servers   E:\\Dedicated",
 
-  "Browse_SelectDrive": "Select a drive",
+  "Browse_SelectDrive": "Select position",
   "Browse_DefaultFolder": "recommended default  ",
   "Browse_SelectPrompt": "Select",
   "Browse_SelectPromptDefault": "Select (ENTER = 1)",
