@@ -25,11 +25,20 @@
             -DisplayName $ruleName `
             -Direction Inbound `
             -Action Allow `
+            -Protocol TCP `
+            -LocalPort $Port `
+            -ErrorAction Stop | Out-Null
+
+        $ruleNameUdp = "$ruleName-UDP"
+        New-NetFirewallRule `
+            -DisplayName $ruleNameUdp `
+            -Direction Inbound `
+            -Action Allow `
             -Protocol UDP `
             -LocalPort $Port `
             -ErrorAction Stop | Out-Null
 
-        Write-Log "Regola firewall creata: $ruleName (porta UDP $Port)" "INFO"
+        Write-Log "Regole firewall create: $ruleName (TCP+UDP porta $Port)" "INFO"
         return $true
     }
     catch {
@@ -61,9 +70,15 @@ function Disable-ServerFirewall {
             return $true
         }
 
-        Remove-NetFirewallRule -DisplayName $ruleName -Confirm:$false -ErrorAction Stop
+        Remove-NetFirewallRule -DisplayName $ruleName -Confirm:$false -ErrorAction SilentlyContinue
 
-        Write-Log "Regola firewall rimossa: $ruleName" "INFO"
+        $ruleNameUdp = "$ruleName-UDP"
+        $ruleUdp = Get-NetFirewallRule -DisplayName $ruleNameUdp -ErrorAction SilentlyContinue
+        if ($ruleUdp) {
+            Remove-NetFirewallRule -DisplayName $ruleNameUdp -Confirm:$false -ErrorAction SilentlyContinue
+        }
+
+        Write-Log "Regole firewall rimosse: $ruleName (TCP+UDP)" "INFO"
         return $true
     }
     catch {
@@ -268,11 +283,11 @@ function Show-FirewallMenu {
                         Write-Host "$(Get-Message -Key 'Firewall_Enabled_Failed')`n" -ForegroundColor Red
                     }
                 }
-                Start-Sleep -Seconds 1
+                Read-Host (Get-Message -Key "Common_PressEnter") | Out-Null
             }
             "2" {
                 Write-Host "`n$(Get-Message -Key 'Firewall_WIP')`n" -ForegroundColor Yellow
-                Start-Sleep -Seconds 2
+                Read-Host (Get-Message -Key "Common_PressEnter") | Out-Null
             }
             "0" {
                 return
@@ -315,6 +330,31 @@ Show-FirewallMenu -ServerName `$ServerName -RootPath `$RootPath -Port `$Port
     Write-Log "Finestra firewall lanciata in background" "INFO"
 }
 
+function Show-ExternalFirewallGuide {
+    param(
+        [string]$FirewallName,
+        [int]$Port = 27016
+    )
+
+    Write-Host ""
+    Write-Host "  $(Get-Message -Key 'Firewall_ExtTitle')" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  $(Get-Message -Key 'Firewall_ExtDetected') " -NoNewline
+    Write-Host $FirewallName -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  $(Get-Message -Key 'Firewall_ExtInfo1')" -ForegroundColor DarkGray
+    Write-Host "  $(Get-Message -Key 'Firewall_ExtInfo2')"
+    Write-Host ""
+    Write-Host "  $(Get-Message -Key 'Firewall_ExtPortLabel')" -ForegroundColor White
+    Write-Host "    $(Get-Message -Key 'Firewall_ExtPort')      : $Port"
+    Write-Host "    $(Get-Message -Key 'Firewall_ExtProtocol')  : $(Get-Message -Key 'Firewall_ExtProtocolValue')"
+    Write-Host "    $(Get-Message -Key 'Firewall_ExtDirection') : $(Get-Message -Key 'Firewall_ExtDirectionValue')"
+    Write-Host ""
+    Write-Host "  $(Get-Message -Key 'Firewall_ExtNote')" -ForegroundColor DarkGray
+    Write-Host ""
+    Read-Host (Get-Message -Key "Firewall_PressEnter") | Out-Null
+}
+
 function Invoke-FirewallManagement {
     param(
         [string]$ServerName,
@@ -323,12 +363,25 @@ function Invoke-FirewallManagement {
         [int]$Port = 27015
     )
 
-    if (-not (Test-Administrator)) {
+    # Detect third-party firewall
+    $tpFwName = $null
+    try {
+        $fwProducts = @(Get-CimInstance -Namespace "root/SecurityCenter2" -ClassName "FirewallProduct" -ErrorAction SilentlyContinue)
+        foreach ($fp in $fwProducts) {
+            if ($fp.displayName -notmatch "Windows") {
+                $tpFwName = $fp.displayName
+                break
+            }
+        }
+    } catch { }
+
+    if ($tpFwName) {
+        Show-ExternalFirewallGuide -FirewallName $tpFwName -Port $Port
+    } elseif (-not (Test-Administrator)) {
         Invoke-ElevatedFirewall -ServerName $ServerName -RootPath $RootPath -Language $Language -Port $Port
-    }
-    else {
+    } else {
         Show-FirewallMenu -ServerName $ServerName -RootPath $RootPath -Port $Port
     }
 }
 
-Export-ModuleMember -Function Enable-ServerFirewall, Disable-ServerFirewall, Test-ServerPort, Get-ServerFirewallRule, Test-Administrator, Show-FirewallMenu, Invoke-ElevatedFirewall, Invoke-FirewallManagement
+Export-ModuleMember -Function Enable-ServerFirewall, Disable-ServerFirewall, Test-ServerPort, Get-ServerFirewallRule, Test-Administrator, Show-FirewallMenu, Invoke-ElevatedFirewall, Show-ExternalFirewallGuide, Invoke-FirewallManagement

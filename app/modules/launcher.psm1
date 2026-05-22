@@ -99,6 +99,9 @@ function Build-LaunchArgs {
         foreach ($a in $Metadata.DefaultLaunchArgs) { $argList.Add($a) }
     }
 
+    # Always enable console log file (srcds writes to left4dead2/console.log)
+    $argList.Add("-condebug")
+
     # -game uses GameId (the Source Engine game identifier)
     $gameId = if ($Metadata.GameId) { $Metadata.GameId } else { $Metadata.GameFolder }
     $argList.Add("-game $gameId")

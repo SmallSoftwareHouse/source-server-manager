@@ -88,4 +88,65 @@ function Start-ServerNormal {
     }
 }
 
-Export-ModuleMember -Function Start-ServerWithMonitoring, Start-ServerNormal
+function Get-ServerConsoleInfo {
+    # Reads console.log to determine last connection type and public IP.
+    # Returns hashtable: PublicIP, LastConnectionType ("matchmaking" | "direct" | $null)
+    param(
+        [string]$ServerPath,
+        [string]$GameFolder = "left4dead2"
+    )
+
+    $result = @{
+        PublicIP           = $null
+        LastConnectionType = $null
+    }
+
+    $consolePath = Join-Path $ServerPath "server\$GameFolder\console.log"
+    if (-not (Test-Path $consolePath)) { return $result }
+
+    $lines = Get-Content $consolePath -Tail 200 -ErrorAction SilentlyContinue
+    if (-not $lines -or $lines.Count -eq 0) { return $result }
+
+    # Extract public IP from the most recent udp/ip line (written after Steam connects)
+    for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+        if ($lines[$i] -match 'udp/ip\s*:.*\[\s*public\s+(\d+\.\d+\.\d+\.\d+):\d+') {
+            $result.PublicIP = $Matches[1]
+            break
+        }
+    }
+
+    # Find index of last Client connected line
+    $clientIdx = -1
+    for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+        if ($lines[$i] -match '^Client ".*" connected') {
+            $clientIdx = $i
+            break
+        }
+    }
+
+    if ($clientIdx -lt 0) { return $result }
+
+    # Find last "Server is hibernating" BEFORE the client connection
+    $hibernateIdx = -1
+    for ($i = $clientIdx - 1; $i -ge 0; $i--) {
+        if ($lines[$i] -match 'Server is hibernating') {
+            $hibernateIdx = $i
+            break
+        }
+    }
+
+    # Search for real reservation cookie between hibernate and client connect
+    $searchFrom = if ($hibernateIdx -ge 0) { $hibernateIdx } else { 0 }
+    $foundReservation = $false
+    for ($i = $searchFrom; $i -lt $clientIdx; $i++) {
+        if ($lines[$i] -match '-> Reservation cookie [0-9a-f]+:\s+reason ReplyReservationRequest') {
+            $foundReservation = $true
+            break
+        }
+    }
+
+    $result.LastConnectionType = if ($foundReservation) { "matchmaking" } else { "direct" }
+    return $result
+}
+
+Export-ModuleMember -Function Start-ServerWithMonitoring, Start-ServerNormal, Get-ServerConsoleInfo
