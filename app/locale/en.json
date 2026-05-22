@@ -18,10 +18,10 @@
 
   "Header_ServerLabel": " Servers:",
   "Header_NoServers": "  No servers registered.",
-  "Header_HiddenServers": "  ... and {0} more servers",
+  "Header_HiddenServers": "  ... and {0} more servers  (use 'Server details' to see all)",
 
   "Menu_CreateServer": "Create server",
-  "Menu_ListServers": "Full server list",
+  "Menu_ListServers": "Server details",
   "Menu_ManageServer": "Manage server",
   "Menu_ResumeInstall": "Resume installation",
   "Menu_RecoverServer": "Import existing server (without moving it)",
@@ -115,7 +115,7 @@
   "Create_PathDefault": "Installation path [default: {0}]",
   "Create_PathPrompt": "Path (leave empty to use default)",
 
-  "List_Title": "Full server list",
+  "List_Title": "Server details",
   "List_Name": "  Name    : {0}",
   "List_Path": "  Path    : {0}",
   "List_Game": "  Game    : {0}",
@@ -275,6 +275,9 @@
   "Startup_IncompleteOne": "[WARNING] Found a server with incomplete installation:",
   "Startup_IncompleteMany": "[WARNING] Found {0} servers with incomplete installation:",
   "Startup_ResumePrompt": "Resume now? (y/n)",
+  "Startup_UnregOne": "[INFO] Found an unregistered server in the default folder:",
+  "Startup_UnregMany": "[INFO] Found {0} unregistered servers in the default folder:",
+  "Startup_UnregPrompt": "Register them now? (y/n)",
 
   "Startup_DiskCheckOk": "Disk space check... [OK]",
   "Startup_DiskCheckWarn": "Disk space check... [WARNING] Low space ({0} GB free)",

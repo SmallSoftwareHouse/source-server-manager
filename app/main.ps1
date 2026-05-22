@@ -303,6 +303,26 @@ if ($incomplete.Count -gt 0) {
     }
 }
 
+# Scan for unregistered servers in the default folder
+$unregistered = @(Find-UnregisteredServers -DefaultInstallRoot $config.DefaultInstallRoot)
+if ($unregistered.Count -gt 0) {
+    Show-Header
+    if ($unregistered.Count -eq 1) {
+        Write-Host "$(Get-Message -Key 'Startup_UnregOne')`n" -ForegroundColor Cyan
+        Write-Host "  $($unregistered[0].Path)"
+    } else {
+        Write-Host "$(Get-Message -Key 'Startup_UnregMany' -MsgArgs @($unregistered.Count))`n" -ForegroundColor Cyan
+        foreach ($u in $unregistered) {
+            Write-Host "  $($u.Path)"
+        }
+    }
+    Write-Host ""
+    $regNow = Read-Host (Get-Message -Key "Startup_UnregPrompt")
+    if ($regNow -eq (Get-Message -Key "ConfirmYes")) {
+        Register-UnregisteredServers -Orphans $unregistered
+    }
+}
+
 while ($true) {
     Show-Header
     Show-ServerSummary | Out-Null

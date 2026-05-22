@@ -92,51 +92,29 @@ function Invoke-ListServers {
         }
     }
 
-    # --- Scan for unregistered servers in default folder ---
-    $orphans = @(Find-UnregisteredServers -DefaultInstallRoot $DefaultInstallRoot)
+    Read-Host (Get-Message -Key "Common_PressEnter")
+}
 
-    Write-Host "====================================="
-    Write-Host (Get-Message -Key "Scan_SectionTitle") -ForegroundColor Yellow
-    Write-Host ""
 
-    if ($orphans.Count -eq 0) {
-        Write-Host (Get-Message -Key "Scan_None") -ForegroundColor DarkGray
-        Write-Host ""
-        Read-Host (Get-Message -Key "Common_PressEnter")
-        return
-    }
-
-    foreach ($o in $orphans) {
-        $folderName = Split-Path -Leaf $o.Path
-        $gamePath   = if ($o.Type -eq "flat") { $o.Path } else { Join-Path $o.Path "server" }
-        $disk       = Get-ServerDiskStatus -Path $gamePath
-        $typeTag    = if ($o.Type -eq "flat") { " [ext]" } else { "" }
-        Write-Host (Get-Message -Key "Scan_Item" -MsgArgs @("$folderName$typeTag", $disk)) -ForegroundColor Yellow
-    }
-    Write-Host ""
-
-    $ans = Read-Host (Get-Message -Key "Scan_RegisterPrompt")
-    if ($ans -ne (Get-Message -Key "ConfirmYes")) {
-        Read-Host (Get-Message -Key "Common_PressEnter")
-        return
-    }
+function Register-UnregisteredServers {
+    # Batch-registers a list of orphan server candidates (output of Find-UnregisteredServers).
+    param([array]$Orphans)
 
     Write-Host ""
     Write-Host (Get-Message -Key "Scan_Registering") -ForegroundColor Cyan
     $count = 0
-    foreach ($o in $orphans) {
+
+    foreach ($o in $Orphans) {
         $folderName  = Split-Path -Leaf $o.Path
         $isFlat      = ($o.Type -eq "flat")
         $gamePath    = Join-Path $o.Path "server"
         $managerPath = Join-Path $o.Path "manager"
 
-        # Skip if name already taken
         if (Get-ServerByName -Name $folderName) {
             Write-Host "  [SKIP] $folderName -- $(Get-Message -Key 'Recover_NameExists')" -ForegroundColor DarkGray
             continue
         }
 
-        # Flat servers: restructure first (move files into server/, create manager/)
         if ($isFlat) {
             try {
                 New-Item -ItemType Directory -Path $gamePath    -Force -ErrorAction Stop | Out-Null
@@ -150,7 +128,6 @@ function Invoke-ListServers {
             catch {
                 Write-Log "Ristrutturazione fallita per $folderName : $_" "ERROR"
                 Write-Host "  [FAIL] $folderName -- $(Get-Message -Key 'Recover_RestructureFailed' -MsgArgs @($_))" -ForegroundColor Red
-                # Cleanup empty dirs
                 if ((Test-Path $gamePath)    -and (Get-ChildItem $gamePath).Count    -eq 0) { Remove-Item $gamePath    -Force -ErrorAction SilentlyContinue }
                 if ((Test-Path $managerPath) -and (Get-ChildItem $managerPath).Count -eq 0) { Remove-Item $managerPath -Force -ErrorAction SilentlyContinue }
                 continue
@@ -189,7 +166,6 @@ function Invoke-ListServers {
     Write-Host (Get-Message -Key "Scan_RegisterDone" -MsgArgs @($count)) -ForegroundColor Green
     Start-Sleep -Seconds 2
 }
-
 
 function Invoke-RenameServer {
     param($server)
@@ -1696,4 +1672,4 @@ function Invoke-ServerSettings {
     }
 }
 
-Export-ModuleMember -Function Get-ShortPath, Find-UnregisteredServers, Invoke-ListServers, Invoke-RenameServer, Invoke-MoveServer, Invoke-StartServer, Stop-ServerMonitoring, Get-CachedPublicIP, Invoke-NetworkMenu, Show-ServerStatusBox, Show-PlayersMenu, Invoke-ManageServer, Invoke-RestartServer, Invoke-ServerSettings
+Export-ModuleMember -Function Get-ShortPath, Find-UnregisteredServers, Register-UnregisteredServers, Invoke-ListServers, Invoke-RenameServer, Invoke-MoveServer, Invoke-StartServer, Stop-ServerMonitoring, Get-CachedPublicIP, Invoke-NetworkMenu, Show-ServerStatusBox, Show-PlayersMenu, Invoke-ManageServer, Invoke-RestartServer, Invoke-ServerSettings
