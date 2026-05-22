@@ -63,6 +63,7 @@
   "Settings_LangChanged": "Language updated.",
   "Settings_ChangeServerRoot": "Default server folder",
   "Settings_ServerRootChanged": "Server folder updated.",
+  "Settings_ServerRootUnchanged": "The selected folder is already the current default. No changes made.",
   "Settings_ResetConfig": "Reset initial configuration",
   "Settings_ResetConfirm": "This will reset language and server folder. They will be asked again on next startup.",
   "Settings_ResetDone": "Configuration reset. Restart the tool.",

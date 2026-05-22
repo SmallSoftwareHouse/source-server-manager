@@ -63,6 +63,7 @@
   "Settings_LangChanged": "Lingua aggiornata.",
   "Settings_ChangeServerRoot": "Cartella server di default",
   "Settings_ServerRootChanged": "Cartella server aggiornata.",
+  "Settings_ServerRootUnchanged": "La cartella impostata e' gia' quella selezionata. Nessun aggiornamento.",
   "Settings_ResetConfig": "Ripristina configurazione iniziale",
   "Settings_ResetConfirm": "Questa operazione azzera lingua e cartella server. Al prossimo avvio verranno richieste di nuovo.",
   "Settings_ResetDone": "Configurazione azzerata. Riavvia il tool.",

@@ -365,8 +365,10 @@ function Invoke-Settings {
                         Save-DefaultInstallRoot -ConfigPath "$RootPath\config\default_config.json" -Path $newRoot
                         $Config.DefaultInstallRoot = $newRoot
                         Write-Host "`n$(Get-Message -Key 'Settings_ServerRootChanged')`n" -ForegroundColor Green
-                        Start-Sleep -Seconds 2
+                    } else {
+                        Write-Host "`n$(Get-Message -Key 'Settings_ServerRootUnchanged')`n" -ForegroundColor DarkGray
                     }
+                    Start-Sleep -Seconds 2
                 }
             }
             "3" {
