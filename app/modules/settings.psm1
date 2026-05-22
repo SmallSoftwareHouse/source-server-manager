@@ -105,7 +105,8 @@ function Select-FolderInteractive {
     $sysDrive = $env:SystemDrive
 
     $singleDrive = ($allDrives.Count -eq 1)
-    $currentPath = if ($singleDrive) { $allDrives[0].DeviceID + '\' } else { "" }
+    # Always start at drive selection so the default option is always visible
+    $currentPath = ""
 
     while ($true) {
         Clear-Host
@@ -233,9 +234,11 @@ function Select-FolderInteractive {
             Write-Host ""
             Write-Host "  S) $(Get-Message -Key 'Browse_SelectHere')" -ForegroundColor Green
             Write-Host "  N) $(Get-Message -Key 'Browse_NewFolder')" -ForegroundColor Cyan
-            if (-not ($singleDrive -and $isAtDriveRoot)) {
-                Write-Host "  0) $(Get-Message -Key 'Browse_Back')" -ForegroundColor White
+            $hasDefaultNav = (-not [string]::IsNullOrEmpty($DefaultInstallRoot)) -and (Test-Path $DefaultInstallRoot)
+            if ($hasDefaultNav) {
+                Write-Host "  D) $(Get-Message -Key 'Browse_GoDefault')" -ForegroundColor Green
             }
+            Write-Host "  0) $(Get-Message -Key 'Browse_Back')" -ForegroundColor White
             Write-Host ""
             Write-Host "  $(Get-Message -Key 'Browse_InputHint')" -ForegroundColor DarkGray
             Write-Host ""
@@ -265,10 +268,10 @@ function Select-FolderInteractive {
                     }
                     if (Test-Path $newPath) { $currentPath = $newPath }
                 }
+            } elseif ($choice -in @("D","d")) {
+                if ($hasDefaultNav) { return $DefaultInstallRoot.TrimEnd('\') }
             } elseif ($choice -eq "0") {
-                if ($singleDrive -and $isAtDriveRoot) {
-                    # Cannot go back
-                } elseif ($isAtDriveRoot) {
+                if ($isAtDriveRoot) {
                     $currentPath = ""
                 } else {
                     $parent = Split-Path -Parent $currentPath

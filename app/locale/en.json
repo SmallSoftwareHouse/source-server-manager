@@ -98,6 +98,7 @@
   "Browse_DefaultOk": "recommended default",
   "Browse_DefaultSystem": "default - system drive",
   "Browse_DefaultLow": "default - low space",
+  "Browse_GoDefault": "Go to default folder",
   "Browse_ContinueWarning": "Limited space (< 20 GB). Continue anyway? (y/n)",
   "Browse_InputHint": "Type a number to enter a folder",
 
