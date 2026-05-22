@@ -48,4 +48,14 @@ function Get-ServerDiskStatus {
     }
 }
 
-Export-ModuleMember -Function Get-ServerDiskStatus
+function Get-GamePath {
+    param($server)
+    return Join-Path $server.Path "server"
+}
+
+function Get-ManagerPath {
+    param($server)
+    return Join-Path $server.Path "manager"
+}
+
+Export-ModuleMember -Function Get-ServerDiskStatus, Get-GamePath, Get-ManagerPath
