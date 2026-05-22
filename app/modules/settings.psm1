@@ -141,9 +141,7 @@ function Select-FolderInteractive {
             for ($i = 0; $i -lt $options.Count; $i++) {
                 $o   = $options[$i]
                 $num = $i + 1
-                Write-Host "  $num) " -NoNewline -ForegroundColor White
-                Write-Host $o.Label -NoNewline -ForegroundColor White
-                Write-Host $o.Suffix -ForegroundColor $o.Color
+                Write-Host "  $num) $($o.Label)$($o.Suffix)" -ForegroundColor $o.Color
             }
             Write-Host ""
             Write-Host "  0) $(Get-Message -Key 'Browse_Cancel')" -ForegroundColor White
