@@ -361,10 +361,12 @@ function Invoke-Settings {
             "2" {
                 $newRoot = Select-FolderInteractive -DefaultInstallRoot $Config.DefaultInstallRoot -Title (Get-Message -Key "Settings_ServerFolderTitle") -CurrentValue $Config.DefaultInstallRoot
                 if ($null -ne $newRoot) {
-                    Save-DefaultInstallRoot -ConfigPath "$RootPath\config\default_config.json" -Path $newRoot
-                    $Config.DefaultInstallRoot = $newRoot
-                    Write-Host "`n$(Get-Message -Key 'Settings_ServerRootChanged')`n" -ForegroundColor Green
-                    Start-Sleep -Seconds 2
+                    if ($newRoot.TrimEnd('\') -ne $Config.DefaultInstallRoot.TrimEnd('\')) {
+                        Save-DefaultInstallRoot -ConfigPath "$RootPath\config\default_config.json" -Path $newRoot
+                        $Config.DefaultInstallRoot = $newRoot
+                        Write-Host "`n$(Get-Message -Key 'Settings_ServerRootChanged')`n" -ForegroundColor Green
+                        Start-Sleep -Seconds 2
+                    }
                 }
             }
             "3" {
