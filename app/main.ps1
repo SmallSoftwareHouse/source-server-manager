@@ -159,12 +159,17 @@ function Show-SettingsSummary {
     if ([string]::IsNullOrWhiteSpace($langDisplay)) { $langDisplay = $config.Language }
 
     # Truncate path from the left if it would overflow the console width
-    $folderLabel   = "$(Get-Message -Key 'Home_DefaultFolder') : "
-    $suffixText    = if ($freeGB -ge 0) { $spaceSuffix } else { "" }
-    $availableWidth = [Console]::WindowWidth - $folderLabel.Length - $suffixText.Length - 2
-    $displayRoot   = $shortRoot
-    if ($displayRoot.Length -gt $availableWidth -and $availableWidth -gt 5) {
-        $displayRoot = "..." + $displayRoot.Substring($displayRoot.Length - ($availableWidth - 3))
+    $folderLabel    = "$(Get-Message -Key 'Home_DefaultFolder') : "
+    $suffixText     = if ($freeGB -ge 0) { $spaceSuffix } else { "" }
+    $availableWidth = [Console]::WindowWidth - $folderLabel.Length - $suffixText.Length - 1
+    $displayRoot    = $shortRoot
+    if ($displayRoot.Length -gt $availableWidth) {
+        $keep = $availableWidth - 3
+        if ($keep -gt 0) {
+            $displayRoot = "..." + $displayRoot.Substring($displayRoot.Length - $keep)
+        } else {
+            $displayRoot = $displayRoot.Substring($displayRoot.Length - $availableWidth)
+        }
     }
 
     Write-Host (Get-Message -Key "Home_SettingsLabel")
