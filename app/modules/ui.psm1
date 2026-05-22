@@ -49,9 +49,9 @@ function Get-PathFreeGB {
 function Write-SpaceIndicator {
     param([double]$GB)
     if ($GB -lt 0) { return }
-    if ($GB -lt 10) {
+    if ($GB -lt 15) {
         Write-Host "  [$(Get-Message -Key 'Browse_Insufficient')  ${GB}GB]" -ForegroundColor Red
-    } elseif ($GB -lt 20) {
+    } elseif ($GB -lt 30) {
         Write-Host "  [$(Get-Message -Key 'Browse_Warning')  ${GB}GB]" -ForegroundColor Yellow
     } else {
         Write-Host "  [$(Get-Message -Key 'Browse_Recommended')  ${GB}GB]" -ForegroundColor Green
@@ -61,16 +61,16 @@ function Write-SpaceIndicator {
 function Get-SpaceColor {
     param([double]$GB)
     if ($GB -lt 0)  { return "Gray" }
-    if ($GB -lt 10) { return "Red" }
-    if ($GB -lt 20) { return "Yellow" }
+    if ($GB -lt 15) { return "Red" }
+    if ($GB -lt 30) { return "Yellow" }
     return "Green"
 }
 
 function Get-SpaceSuffix {
     param([double]$GB)
     if ($GB -lt 0)  { return "" }
-    if ($GB -lt 10) { return "  [$(Get-Message -Key 'Browse_Insufficient')  ${GB}GB]" }
-    if ($GB -lt 20) { return "  [$(Get-Message -Key 'Browse_Warning')  ${GB}GB]" }
+    if ($GB -lt 15) { return "  [$(Get-Message -Key 'Browse_Insufficient')  ${GB}GB]" }
+    if ($GB -lt 30) { return "  [$(Get-Message -Key 'Browse_Warning')  ${GB}GB]" }
     return "  [$(Get-Message -Key 'Browse_Recommended')  ${GB}GB]"
 }
 

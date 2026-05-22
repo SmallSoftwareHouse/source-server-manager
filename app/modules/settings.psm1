@@ -120,11 +120,22 @@ function Select-FolderInteractive {
             # Build option list: default first (if available), then drives
             $options = @()
             if ($hasDefault) {
-                $defDrv    = $allDrives | Where-Object { $_.DeviceID -eq $DefaultInstallRoot.Substring(0,2) } | Select-Object -First 1
-                $defFreeGB = if ($defDrv) { [math]::Round($defDrv.FreeSpace / 1GB, 1) } else { -1 }
-                $defColor  = Get-SpaceColor  -GB $defFreeGB
-                $defGB     = if ($defFreeGB -ge 0) { "${defFreeGB}GB" } else { "" }
-                $options  += [PSCustomObject]@{ Type = "default"; Label = $DefaultInstallRoot; Suffix = "  [$(Get-Message -Key 'Browse_DefaultFolder')$defGB]"; Color = $defColor }
+                $defDrvLetter = $DefaultInstallRoot.Substring(0,2)
+                $defDrv       = $allDrives | Where-Object { $_.DeviceID -eq $defDrvLetter } | Select-Object -First 1
+                $defFreeGB    = if ($defDrv) { [math]::Round($defDrv.FreeSpace / 1GB, 1) } else { -1 }
+                $defIsSystem  = ($defDrvLetter -eq $sysDrive)
+                $defGB        = if ($defFreeGB -ge 0) { "${defFreeGB}GB" } else { "" }
+                if ($defIsSystem) {
+                    $defLabel = Get-Message -Key "Browse_DefaultSystem"
+                    $defColor = "Yellow"
+                } elseif ($defFreeGB -ge 0 -and $defFreeGB -lt 15) {
+                    $defLabel = Get-Message -Key "Browse_DefaultLow"
+                    $defColor = "Red"
+                } else {
+                    $defLabel = Get-Message -Key "Browse_DefaultOk"
+                    $defColor = "Green"
+                }
+                $options += [PSCustomObject]@{ Type = "default"; Label = $DefaultInstallRoot; Suffix = "  [$defLabel  $defGB]"; Color = $defColor }
             }
             foreach ($drv in $allDrives) {
                 $letter = $drv.DeviceID
@@ -141,9 +152,18 @@ function Select-FolderInteractive {
             for ($i = 0; $i -lt $options.Count; $i++) {
                 $o   = $options[$i]
                 $num = $i + 1
-                Write-Host "  $num) $($o.Label)$($o.Suffix)" -ForegroundColor $o.Color
+                $suffixColor = switch ($o.Color) {
+                    "Green"  { [ConsoleColor]::Green }
+                    "Yellow" { [ConsoleColor]::Yellow }
+                    "Red"    { [ConsoleColor]::Red }
+                    default  { [ConsoleColor]::White }
+                }
+                [Console]::ForegroundColor = [ConsoleColor]::White
+                [Console]::Write("  $num) $($o.Label)")
+                [Console]::ForegroundColor = $suffixColor
+                [Console]::WriteLine($o.Suffix)
+                [Console]::ResetColor()
             }
-            Write-Host ""
             Write-Host "  0) $(Get-Message -Key 'Browse_Cancel')" -ForegroundColor White
             Write-Host ""
 
