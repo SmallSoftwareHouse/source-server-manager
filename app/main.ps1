@@ -321,7 +321,7 @@ function Invoke-StartupIncompleteCheck {
         Write-Host "$(Get-Message -Key 'Startup_IncompleteOne')`n" -ForegroundColor Yellow
         Write-Host "  $($s.Name)  [$diskLabel : $disk]"
         Write-Host ""
-        $resume = Read-Host (Get-Message -Key "Startup_ResumePrompt")
+        $resume = (Read-Host (Get-Message -Key "Startup_ResumePrompt")).Trim()
         if ($resume -eq (Get-Message -Key "ConfirmYes")) {
             Start-ServerInstall -Target $s -RootPath $RootPath -Config $config
         }
