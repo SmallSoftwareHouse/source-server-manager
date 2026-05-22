@@ -219,33 +219,26 @@ function Show-ServerSummary {
 
 function Show-Menu {
     param(
-        [bool]$ShowListOption = $false,
-        [bool]$HasIncomplete  = $false
+        [bool]$HasServers    = $false,
+        [bool]$HasIncomplete = $false
     )
 
     Write-Host "  1) $(Get-Message -Key 'Menu_CreateServer')"
-    if ($ShowListOption) {
+    if ($HasServers) {
         Write-Host "  2) $(Get-Message -Key 'Menu_ListServers')"
         Write-Host "  3) $(Get-Message -Key 'Menu_ManageServer')"
-        if ($HasIncomplete) {
-            Write-Host "  4) $(Get-Message -Key 'Menu_ResumeInstall')"
-        } else {
-            Write-Host "  4) $(Get-Message -Key 'Menu_ResumeInstall')" -ForegroundColor DarkGray
-        }
-        Write-Host "  5) $(Get-Message -Key 'Menu_RecoverServer')"
-        Write-Host "  6) $(Get-Message -Key 'Menu_Settings')"
-        Write-Host "  7) $(Get-Message -Key 'Menu_Exit')"
     } else {
-        Write-Host "  2) $(Get-Message -Key 'Menu_ManageServer')"
-        if ($HasIncomplete) {
-            Write-Host "  3) $(Get-Message -Key 'Menu_ResumeInstall')"
-        } else {
-            Write-Host "  3) $(Get-Message -Key 'Menu_ResumeInstall')" -ForegroundColor DarkGray
-        }
-        Write-Host "  4) $(Get-Message -Key 'Menu_RecoverServer')"
-        Write-Host "  5) $(Get-Message -Key 'Menu_Settings')"
-        Write-Host "  6) $(Get-Message -Key 'Menu_Exit')"
+        Write-Host "  2) $(Get-Message -Key 'Menu_ListServers')" -ForegroundColor DarkGray
+        Write-Host "  3) $(Get-Message -Key 'Menu_ManageServer')" -ForegroundColor DarkGray
     }
+    if ($HasIncomplete) {
+        Write-Host "  4) $(Get-Message -Key 'Menu_ResumeInstall')"
+    } else {
+        Write-Host "  4) $(Get-Message -Key 'Menu_ResumeInstall')" -ForegroundColor DarkGray
+    }
+    Write-Host "  5) $(Get-Message -Key 'Menu_RecoverServer')"
+    Write-Host "  6) $(Get-Message -Key 'Menu_Settings')"
+    Write-Host "  7) $(Get-Message -Key 'Menu_Exit')"
     Write-Host ""
 }
 
@@ -312,56 +305,47 @@ if ($incomplete.Count -gt 0) {
 
 while ($true) {
     Show-Header
-    $hasHidden = Show-ServerSummary
+    Show-ServerSummary | Out-Null
     Show-SettingsSummary
 
+    $hasServers = (@(Get-ServerRegistry).Count -gt 0)
     $hasIncomplete = (@(Get-ServerRegistry | Where-Object {
         $_.Status -ne "Installed" -or (Get-ServerDiskStatus -Path (Get-GamePath $_)) -ne "Installed"
     }).Count -gt 0)
 
-    Show-Menu -ShowListOption $hasHidden -HasIncomplete $hasIncomplete
+    Show-Menu -HasServers $hasServers -HasIncomplete $hasIncomplete
 
     $choice = Read-Host (Get-Message -Key "Common_Select")
 
-    if ($hasHidden) {
-        switch ($choice) {
-            "1" { Invoke-CreateServer -RootPath $RootPath -Config $config }
-            "2" { Invoke-ListServers -DefaultInstallRoot $config.DefaultInstallRoot }
-            "3" { Invoke-ManageServer -RootPath $RootPath -Config $config }
-            "4" {
-                if ($hasIncomplete) { Invoke-ResumeInstallation -RootPath $RootPath -Config $config }
-                else {
-                    Write-Host "`n$(Get-Message -Key 'Resume_NoneIncomplete')`n" -ForegroundColor DarkGray
-                    Start-Sleep -Seconds 1
-                }
-            }
-            "5" { Invoke-RecoverServer }
-            "6" { Invoke-Settings -Config $config -RootPath $RootPath }
-            "7" { Write-Log "Manager chiuso" "INFO"; exit }
-            default {
-                Write-Host "`n$(Get-Message -Key 'Common_InvalidOption')`n" -ForegroundColor Yellow
+    switch ($choice) {
+        "1" { Invoke-CreateServer -RootPath $RootPath -Config $config }
+        "2" {
+            if ($hasServers) { Invoke-ListServers -DefaultInstallRoot $config.DefaultInstallRoot }
+            else {
+                Write-Host "`n$(Get-Message -Key 'Common_OptionUnavailable' -MsgArgs @(''))`n" -ForegroundColor DarkGray
                 Start-Sleep -Seconds 1
             }
         }
-    }
-    else {
-        switch ($choice) {
-            "1" { Invoke-CreateServer -RootPath $RootPath -Config $config }
-            "2" { Invoke-ManageServer -RootPath $RootPath -Config $config }
-            "3" {
-                if ($hasIncomplete) { Invoke-ResumeInstallation -RootPath $RootPath -Config $config }
-                else {
-                    Write-Host "`n$(Get-Message -Key 'Resume_NoneIncomplete')`n" -ForegroundColor DarkGray
-                    Start-Sleep -Seconds 1
-                }
-            }
-            "4" { Invoke-RecoverServer }
-            "5" { Invoke-Settings -Config $config -RootPath $RootPath }
-            "6" { Write-Log "Manager chiuso" "INFO"; exit }
-            default {
-                Write-Host "`n$(Get-Message -Key 'Common_InvalidOption')`n" -ForegroundColor Yellow
+        "3" {
+            if ($hasServers) { Invoke-ManageServer -RootPath $RootPath -Config $config }
+            else {
+                Write-Host "`n$(Get-Message -Key 'Common_OptionUnavailable' -MsgArgs @(''))`n" -ForegroundColor DarkGray
                 Start-Sleep -Seconds 1
             }
+        }
+        "4" {
+            if ($hasIncomplete) { Invoke-ResumeInstallation -RootPath $RootPath -Config $config }
+            else {
+                Write-Host "`n$(Get-Message -Key 'Resume_NoneIncomplete')`n" -ForegroundColor DarkGray
+                Start-Sleep -Seconds 1
+            }
+        }
+        "5" { Invoke-RecoverServer }
+        "6" { Invoke-Settings -Config $config -RootPath $RootPath }
+        "7" { Write-Log "Manager chiuso" "INFO"; exit }
+        default {
+            Write-Host "`n$(Get-Message -Key 'Common_InvalidOption')`n" -ForegroundColor Yellow
+            Start-Sleep -Seconds 1
         }
     }
 }
