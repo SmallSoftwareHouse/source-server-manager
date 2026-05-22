@@ -99,6 +99,7 @@
   "Browse_DefaultSystem": "default - disco di sistema",
   "Browse_DefaultLow": "default - spazio scarso",
   "Browse_GoDefault": "Vai alla cartella di default",
+  "Browse_CurrentDefault": "Attualmente impostata:",
   "Browse_ContinueWarning": "Spazio limitato (< 20 GB). Vuoi continuare comunque? (s/n)",
   "Browse_InputHint": "Digita un numero per entrare in una cartella",
 

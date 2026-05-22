@@ -96,7 +96,8 @@ function Test-IsSystemFolder {
 function Select-FolderInteractive {
     param(
         [string]$DefaultInstallRoot = "",
-        [string]$Title = ""
+        [string]$Title = "",
+        [string]$CurrentValue = ""
     )
 
     $allDrives = @(Get-WmiObject Win32_LogicalDisk -ErrorAction SilentlyContinue |
@@ -115,6 +116,11 @@ function Select-FolderInteractive {
         Write-Host "  $displayTitle" -ForegroundColor White
         Write-Host "=====================================" -ForegroundColor Cyan
         Write-Host ""
+        if (-not [string]::IsNullOrEmpty($CurrentValue)) {
+            Write-Host "  $(Get-Message -Key 'Browse_CurrentDefault')" -NoNewline -ForegroundColor DarkGray
+            Write-Host "  $CurrentValue" -ForegroundColor White
+            Write-Host ""
+        }
 
         if ($currentPath -eq "") {
             $hasDefault = (-not [string]::IsNullOrEmpty($DefaultInstallRoot)) -and (Test-Path $DefaultInstallRoot)
@@ -157,17 +163,8 @@ function Select-FolderInteractive {
             for ($i = 0; $i -lt $options.Count; $i++) {
                 $o   = $options[$i]
                 $num = $i + 1
-                $suffixColor = switch ($o.Color) {
-                    "Green"  { [ConsoleColor]::Green }
-                    "Yellow" { [ConsoleColor]::Yellow }
-                    "Red"    { [ConsoleColor]::Red }
-                    default  { [ConsoleColor]::White }
-                }
-                [Console]::ForegroundColor = [ConsoleColor]::White
-                [Console]::Write("  $num) $($o.Label)")
-                [Console]::ForegroundColor = $suffixColor
-                [Console]::WriteLine($o.Suffix)
-                [Console]::ResetColor()
+                Write-Host "  $num) " -NoNewline -ForegroundColor White
+                Write-Host "$($o.Label)$($o.Suffix)" -ForegroundColor $o.Color
             }
             Write-Host "  0) $(Get-Message -Key 'Browse_Cancel')" -ForegroundColor White
             Write-Host ""
@@ -360,7 +357,7 @@ function Invoke-Settings {
                 }
             }
             "2" {
-                $newRoot = Select-FolderInteractive -DefaultInstallRoot $Config.DefaultInstallRoot -Title (Get-Message -Key "Settings_ServerFolderTitle")
+                $newRoot = Select-FolderInteractive -DefaultInstallRoot $Config.DefaultInstallRoot -Title (Get-Message -Key "Settings_ServerFolderTitle") -CurrentValue $Config.DefaultInstallRoot
                 if ($null -ne $newRoot) {
                     Save-DefaultInstallRoot -ConfigPath "$RootPath\config\default_config.json" -Path $newRoot
                     $Config.DefaultInstallRoot = $newRoot
