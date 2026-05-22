@@ -112,64 +112,66 @@ function Select-FolderInteractive {
         Write-Host ""
 
         if ($currentPath -eq "") {
-            # Show default folder shortcut if provided
             $hasDefault = (-not [string]::IsNullOrEmpty($DefaultInstallRoot)) -and (Test-Path $DefaultInstallRoot)
-            if ($hasDefault) {
-                $defDrive = $DefaultInstallRoot.Substring(0,2) + '\'
-                $defDrv   = $allDrives | Where-Object { $_.DeviceID -eq $DefaultInstallRoot.Substring(0,2) } | Select-Object -First 1
-                $defFreeGB = if ($defDrv) { [math]::Round($defDrv.FreeSpace / 1GB, 1) } else { -1 }
-                $defSuffix = Get-SpaceSuffix -GB $defFreeGB
-                $defColor  = Get-SpaceColor  -GB $defFreeGB
-                Write-Host "  INVIO) " -NoNewline -ForegroundColor Green
-                Write-Host "$DefaultInstallRoot " -NoNewline -ForegroundColor White
-                Write-Host "$(Get-Message -Key 'Browse_DefaultFolder')" -NoNewline -ForegroundColor Green
-                Write-Host $defSuffix -ForegroundColor $defColor
-                Write-Host ""
-            }
 
             Write-Host "  --- $(Get-Message -Key 'Browse_SelectDrive') ---" -ForegroundColor Yellow
             Write-Host ""
 
-            $idx = 1
+            # Build option list: default first (if available), then drives
+            $options = @()
+            if ($hasDefault) {
+                $defDrv    = $allDrives | Where-Object { $_.DeviceID -eq $DefaultInstallRoot.Substring(0,2) } | Select-Object -First 1
+                $defFreeGB = if ($defDrv) { [math]::Round($defDrv.FreeSpace / 1GB, 1) } else { -1 }
+                $defSuffix = Get-SpaceSuffix -GB $defFreeGB
+                $defColor  = Get-SpaceColor  -GB $defFreeGB
+                $options  += [PSCustomObject]@{ Type = "default"; Label = $DefaultInstallRoot; Suffix = "  [$(Get-Message -Key 'Browse_DefaultFolder')$defSuffix]"; Color = $defColor }
+            }
             foreach ($drv in $allDrives) {
                 $letter = $drv.DeviceID
                 $freeGB = [math]::Round($drv.FreeSpace / 1GB, 1)
-                $isSystem = ($letter -eq $sysDrive)
-                if ($isSystem) {
-                    $label  = "  $idx) $letter\"
-                    $suffix = "  [$(Get-Message -Key 'Browse_SystemDrive')  ${freeGB}GB]"
-                    Write-Host $label -NoNewline -ForegroundColor White
-                    Write-Host $suffix -ForegroundColor Yellow
+                if ($letter -eq $sysDrive) {
+                    $options += [PSCustomObject]@{ Type = "drive"; Label = "$letter\"; Suffix = "  [$(Get-Message -Key 'Browse_SystemDrive')  ${freeGB}GB]"; Color = "Yellow" }
                 } else {
                     $suffix = Get-SpaceSuffix -GB $freeGB
-                    $color  = Get-SpaceColor -GB $freeGB
-                    Write-Host "  $idx) $letter\" -NoNewline -ForegroundColor White
-                    Write-Host $suffix -ForegroundColor $color
+                    $color  = Get-SpaceColor  -GB $freeGB
+                    $options += [PSCustomObject]@{ Type = "drive"; Label = "$letter\"; Suffix = $suffix; Color = $color }
                 }
-                $idx++
+            }
+
+            for ($i = 0; $i -lt $options.Count; $i++) {
+                $o   = $options[$i]
+                $num = $i + 1
+                Write-Host "  $num) " -NoNewline -ForegroundColor White
+                Write-Host $o.Label -NoNewline -ForegroundColor White
+                Write-Host $o.Suffix -ForegroundColor $o.Color
             }
             Write-Host ""
             Write-Host "  0) $(Get-Message -Key 'Browse_Cancel')" -ForegroundColor White
             Write-Host ""
 
-            $choice = (Read-Host "  >").Trim()
+            $prompt = if ($hasDefault) { Get-Message -Key "Browse_SelectPromptDefault" } else { Get-Message -Key "Browse_SelectPrompt" }
+            $choice = (Read-Host "  $prompt").Trim()
 
-            # ENTER = default folder
-            if ($choice -eq "" -and $hasDefault) {
-                return $DefaultInstallRoot.TrimEnd('\')
-            }
+            # ENTER = option 1 (default folder) when available
+            if ($choice -eq "" -and $hasDefault) { $choice = "1" }
             if ($choice -eq "0") { return $null }
             if ($choice -match '^\d+$') {
                 $ci = [int]$choice - 1
-                if ($ci -ge 0 -and $ci -lt $allDrives.Count) {
-                    $freeGB = [math]::Round($allDrives[$ci].FreeSpace / 1GB, 1)
+                if ($ci -ge 0 -and $ci -lt $options.Count) {
+                    $opt = $options[$ci]
+                    if ($opt.Type -eq "default") {
+                        return $DefaultInstallRoot.TrimEnd('\')
+                    }
+                    # It's a drive — check space
+                    $drvObj = $allDrives | Where-Object { ($_.DeviceID + '\') -eq $opt.Label } | Select-Object -First 1
+                    $freeGB = if ($drvObj) { [math]::Round($drvObj.FreeSpace / 1GB, 1) } else { -1 }
                     if ($freeGB -ge 0 -and $freeGB -lt 10) {
                         Write-Host ""
                         Write-Host "  $(Get-Message -Key 'Browse_InsufficientSpace')" -ForegroundColor Red
                         Start-Sleep -Seconds 2
                         continue
                     }
-                    $currentPath = $allDrives[$ci].DeviceID + '\'
+                    $currentPath = $opt.Label
                 }
             }
         } else {
