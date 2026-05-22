@@ -287,6 +287,8 @@
   "Startup_IncompleteOne": "[WARNING] Found a server with incomplete installation:",
   "Startup_IncompleteMany": "[WARNING] Found {0} servers with incomplete installation:",
   "Startup_ResumePrompt": "Resume now? (y/n)",
+  "Startup_ResumePickPrompt": "Which one do you want to resume? (number, 0 to skip)",
+  "Startup_NewIncompleteAfterReg": "[INFO] {0} newly registered servers have incomplete installation:",
   "Startup_UnregOne": "[INFO] Found an unregistered server in the default folder:",
   "Startup_UnregMany": "[INFO] Found {0} unregistered servers in the default folder:",
   "Startup_UnregPrompt": "Register them now? (y/n)",

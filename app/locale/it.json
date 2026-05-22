@@ -287,6 +287,8 @@
   "Startup_IncompleteOne": "[ATTENZIONE] Trovato server con installazione incompleta:",
   "Startup_IncompleteMany": "[ATTENZIONE] Trovati {0} server con installazione incompleta:",
   "Startup_ResumePrompt": "Vuoi riprendere adesso? (s/n)",
+  "Startup_ResumePickPrompt": "Quale vuoi riprendere? (numero, 0 per saltare)",
+  "Startup_NewIncompleteAfterReg": "[INFO] {0} server appena registrati hanno installazione incompleta:",
   "Startup_UnregOne": "[INFO] Trovato server non registrato nella cartella di default:",
   "Startup_UnregMany": "[INFO] Trovati {0} server non registrati nella cartella di default:",
   "Startup_UnregPrompt": "Vuoi registrarli adesso? (s/n)",

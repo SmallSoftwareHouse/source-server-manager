@@ -312,28 +312,39 @@ if ($activeDownloads.Count -gt 0) {
     Read-Host (Get-Message -Key "Common_PressEnter") | Out-Null
 }
 
-if ($incomplete.Count -gt 0) {
-    Show-Header
+function Invoke-StartupIncompleteCheck {
+    param([array]$IncompleteList)
     $diskLabel = Get-Message -Key "Resume_DiskLabel"
-    if ($incomplete.Count -eq 1) {
-        $s = $incomplete[0]
+    if ($IncompleteList.Count -eq 1) {
+        $s = $IncompleteList[0]
         $disk = Get-ServerDiskStatus -Path (Get-GamePath $s)
         Write-Host "$(Get-Message -Key 'Startup_IncompleteOne')`n" -ForegroundColor Yellow
-        Write-Host "  $($s.Name)  [$($diskLabel): $disk]"
+        Write-Host "  $($s.Name)  [$diskLabel : $disk]"
         Write-Host ""
         $resume = Read-Host (Get-Message -Key "Startup_ResumePrompt")
-        if ($resume -eq (Get-Message -Key "ConfirmYes")) { Start-ServerInstall -Target $s -RootPath $RootPath -Config $config }
-    }
-    else {
-        Write-Host "$(Get-Message -Key 'Startup_IncompleteMany' -MsgArgs @($incomplete.Count))`n" -ForegroundColor Yellow
-        foreach ($s in $incomplete) {
+        if ($resume -eq (Get-Message -Key "ConfirmYes")) {
+            Start-ServerInstall -Target $s -RootPath $RootPath -Config $config
+        }
+    } else {
+        Write-Host "$(Get-Message -Key 'Startup_IncompleteMany' -MsgArgs @($IncompleteList.Count))`n" -ForegroundColor Yellow
+        for ($i = 0; $i -lt $IncompleteList.Count; $i++) {
+            $s    = $IncompleteList[$i]
             $disk = Get-ServerDiskStatus -Path (Get-GamePath $s)
-            Write-Host "  - $($s.Name)  [$($diskLabel): $disk]"
+            $num  = "$($i+1)".PadLeft(3)
+            Write-Host "$num) $($s.Name.PadRight(16)) [$diskLabel : $disk]"
         }
         Write-Host ""
-        $resume = Read-Host (Get-Message -Key "Startup_ResumePrompt")
-        if ($resume -eq (Get-Message -Key "ConfirmYes")) { Invoke-ResumeInstallation -RootPath $RootPath -Config $config }
+        $pick = Read-Host (Get-Message -Key "Startup_ResumePickPrompt")
+        $n = 0
+        if ([int]::TryParse($pick, [ref]$n) -and $n -ge 1 -and $n -le $IncompleteList.Count) {
+            Start-ServerInstall -Target $IncompleteList[$n-1] -RootPath $RootPath -Config $config
+        }
     }
+}
+
+if ($incomplete.Count -gt 0) {
+    Show-Header
+    Invoke-StartupIncompleteCheck -IncompleteList $incomplete
 }
 
 # Scan for unregistered servers in the default folder
@@ -353,6 +364,24 @@ if ($unregistered.Count -gt 0) {
     $regNow = Read-Host (Get-Message -Key "Startup_UnregPrompt")
     if ($regNow -eq (Get-Message -Key "ConfirmYes")) {
         Register-UnregisteredServers -Orphans $unregistered
+
+        # Re-check: any newly registered servers that are incomplete?
+        $newIncomplete = @(Get-ServerRegistry | Where-Object {
+            $sid = $_.ServerId
+            # Only servers that were just registered (not in original incomplete list)
+            $wasAlreadyKnown = ($incomplete | Where-Object { $_.ServerId -eq $sid })
+            if ($wasAlreadyKnown) { return $false }
+            $_.Status -ne "Installed" -or (Get-ServerDiskStatus -Path (Get-GamePath $_)) -ne "Installed"
+        })
+        if ($newIncomplete.Count -gt 0) {
+            Show-Header
+            Write-Host "$(Get-Message -Key 'Startup_NewIncompleteAfterReg' -MsgArgs @($newIncomplete.Count))`n" -ForegroundColor Yellow
+            foreach ($s in $newIncomplete) {
+                Write-Host "  - $($s.Name)" -ForegroundColor Yellow
+            }
+            Write-Host ""
+            Invoke-StartupIncompleteCheck -IncompleteList $newIncomplete
+        }
     }
 }
 
