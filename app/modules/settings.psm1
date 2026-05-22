@@ -146,7 +146,9 @@ function Select-FolderInteractive {
                     $defLabel = Get-Message -Key "Browse_DefaultOk"
                     $defColor = "Green"
                 }
-                $options += [PSCustomObject]@{ Type = "default"; Label = $DefaultInstallRoot; Suffix = "  [$defLabel  $defGB]"; Color = $defColor }
+                $isAlreadySet = (-not [string]::IsNullOrEmpty($CurrentValue)) -and ($DefaultInstallRoot.TrimEnd('\') -eq $CurrentValue.TrimEnd('\'))
+                $finalColor   = if ($isAlreadySet) { "DarkGray" } else { $defColor }
+                $options += [PSCustomObject]@{ Type = "default"; Label = $DefaultInstallRoot; Suffix = "  [$defLabel  $defGB]"; Color = $finalColor }
             }
             foreach ($drv in $allDrives) {
                 $letter = $drv.DeviceID
