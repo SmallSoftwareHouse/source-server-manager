@@ -17,7 +17,7 @@ $host.ui.RawUI.WindowTitle = "Source Server Manager"
 
 
 Import-Module "$RootPath\modules\messages.psm1"   -Force -Global -WarningAction SilentlyContinue
-Import-Module "$RootPath\modules\ui.psm1"         -Force -WarningAction SilentlyContinue
+Import-Module "$RootPath\modules\ui.psm1"         -Force -Global -WarningAction SilentlyContinue
 Import-Module "$RootPath\modules\logging.psm1"    -Force -WarningAction SilentlyContinue
 Import-Module "$RootPath\modules\registry.psm1"   -Force -WarningAction SilentlyContinue
 Import-Module "$RootPath\modules\validation.psm1" -Force -WarningAction SilentlyContinue
@@ -27,7 +27,8 @@ Import-Module "$RootPath\modules\splash.psm1"     -Force -WarningAction Silently
 Import-Module "$RootPath\modules\launcher.psm1"   -Force -WarningAction SilentlyContinue
 Import-Module "$RootPath\modules\server-monitor.psm1" -Force -WarningAction SilentlyContinue
 Import-Module "$RootPath\modules\server\server-config.psm1" -WarningAction SilentlyContinue
-Import-Module "$RootPath\modules\network.psm1"  -Force -WarningAction SilentlyContinue
+Import-Module "$RootPath\modules\network.psm1"             -Force -WarningAction SilentlyContinue
+Import-Module "$RootPath\modules\network-diagnostics.psm1" -Force -WarningAction SilentlyContinue
 Import-Module "$RootPath\modules\modding.psm1" -Force -WarningAction SilentlyContinue
 Import-Module "$RootPath\modules\rcon.psm1"             -Force -WarningAction SilentlyContinue
 Import-Module "$RootPath\modules\sourcemod-admin.psm1"  -Force -WarningAction SilentlyContinue
@@ -109,51 +110,6 @@ function Save-DefaultInstallRoot {
 # Interactive folder browser helpers
 # -------------------------------------------------------
 
-function Get-DriveFreeGB {
-    param([string]$DriveLetter)
-    try {
-        $wmi = Get-WmiObject Win32_LogicalDisk -Filter "DeviceID='${DriveLetter}:'" -ErrorAction SilentlyContinue
-        if ($wmi) { return [math]::Round($wmi.FreeSpace / 1GB, 1) }
-    } catch { }
-    return -1
-}
-
-function Get-PathFreeGB {
-    param([string]$Path)
-    try {
-        $letter = ($Path -replace '^([A-Za-z]):.*', '$1')
-        return Get-DriveFreeGB -DriveLetter $letter
-    } catch { }
-    return -1
-}
-
-function Write-SpaceIndicator {
-    param([double]$GB)
-    if ($GB -lt 0) { return }
-    if ($GB -lt 10) {
-        Write-Host "  [$(Get-Message -Key 'Browse_Insufficient')  ${GB}GB]" -ForegroundColor Red
-    } elseif ($GB -lt 20) {
-        Write-Host "  [$(Get-Message -Key 'Browse_Warning')  ${GB}GB]" -ForegroundColor Yellow
-    } else {
-        Write-Host "  [$(Get-Message -Key 'Browse_Recommended')  ${GB}GB]" -ForegroundColor Green
-    }
-}
-
-function Get-SpaceColor {
-    param([double]$GB)
-    if ($GB -lt 0)  { return "Gray" }
-    if ($GB -lt 10) { return "Red" }
-    if ($GB -lt 20) { return "Yellow" }
-    return "Green"
-}
-
-function Get-SpaceSuffix {
-    param([double]$GB)
-    if ($GB -lt 0)  { return "" }
-    if ($GB -lt 10) { return "  [$(Get-Message -Key 'Browse_Insufficient')  ${GB}GB]" }
-    if ($GB -lt 20) { return "  [$(Get-Message -Key 'Browse_Warning')  ${GB}GB]" }
-    return "  [$(Get-Message -Key 'Browse_Recommended')  ${GB}GB]"
-}
 
 function Test-IsSystemFolder {
     param([string]$Path)
@@ -450,16 +406,6 @@ function Get-NextAvailablePort {
     return $port
 }
 
-function Format-SectionTitle {
-    param([string]$Title)
-    $width = 37
-    $inner = " $Title "
-    $remaining = $width - $inner.Length
-    if ($remaining -lt 0) { $remaining = 0 }
-    $left  = [Math]::Floor($remaining / 2)
-    $right = $remaining - $left
-    return ("=" * $left) + $inner + ("=" * $right)
-}
 
 function Get-ShortPath {
     param([string]$Path)
@@ -1211,6 +1157,9 @@ Start-ServerWithMonitoring -InstallPath '$gamePath' -ManagerPath '$managerPath' 
             Write-Host "$(Get-Message -Key 'Start_AutoRestartActive')`n" -ForegroundColor Cyan
         }
 
+        # Mark this server as started in the current session
+        $script:_StartedThisSession = @($script:_StartedThisSession) + $server.ServerId
+
         Write-Log "Server avviato: $($server.Name)" "INFO"
         Write-Host "`n$(Get-Message -Key 'Start_Success')`n" -ForegroundColor Green
         Read-Host (Get-Message -Key "Common_PressEnter")
@@ -1281,6 +1230,136 @@ function Stop-ServerMonitoring {
     }
 }
 
+# Session-level public IP cache (avoids repeated HTTP calls)
+$script:_PubIPCache    = $null
+$script:_PubIPCacheAge = $null
+
+# Track servers started in this tool session (by ServerId)
+$script:_StartedThisSession = @()
+
+function Get-CachedPublicIP {
+    $now = Get-Date
+    $stale = (-not $script:_PubIPCacheAge) -or
+             (($now - $script:_PubIPCacheAge).TotalMinutes -gt 10)
+    if ($stale) {
+        try {
+            $fetched = (Invoke-WebRequest -Uri "https://api.ipify.org?format=json" `
+                        -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop | ConvertFrom-Json).ip
+            if ($fetched) {
+                $script:_PubIPCache    = $fetched
+                $script:_PubIPCacheAge = $now
+            }
+        } catch {}
+    }
+    return $script:_PubIPCache
+}
+
+function Invoke-NetworkMenu {
+    param(
+        [object]$Selected,
+        [bool]$IsRunning = $false
+    )
+
+    $fwMeta = Get-GameMetadata -Game $Selected.Game
+    $fwCfg  = Get-ServerManagerConfig -ManagerPath (Get-ManagerPath $Selected)
+    $fwPort = [int](Resolve-ServerParam -ManagerConfig $fwCfg -Field "Port" `
+                   -MetadataDefault ($fwMeta.DefaultGamePort) -HardcodedDefault 27016)
+
+    while ($true) {
+        # Re-check running state on each loop iteration
+        $netRunFile2 = Join-Path (Get-ManagerPath $Selected) ".running"
+        $IsRunning = $false
+        if (Test-Path $netRunFile2) {
+            try {
+                $netRd2 = Get-Content $netRunFile2 -Raw | ConvertFrom-Json
+                if ($netRd2.PowerShellPID) {
+                    $pp2 = Get-Process -Id $netRd2.PowerShellPID -ErrorAction SilentlyContinue
+                    if ($pp2 -and $pp2.ProcessName -match "powershell|pwsh") { $IsRunning = $true }
+                }
+                if (-not $IsRunning -and $netRd2.ServerProcessId) {
+                    $sp2 = Get-Process -Id $netRd2.ServerProcessId -ErrorAction SilentlyContinue
+                    if ($sp2 -and $sp2.ProcessName -like "*srcds*") { $IsRunning = $true }
+                }
+            } catch {}
+        }
+
+        # Fallback: if .running file is absent or stale, check via A2S_INFO query
+        # This handles servers started outside the tool or after a crash recovery
+        if (-not $IsRunning) {
+            $netFbLocalIP = Get-PreferredLocalIP
+            if ($netFbLocalIP) {
+                $IsRunning = Test-SourceQueryReachable -IP $netFbLocalIP -Port $fwPort -TimeoutMs 1000
+            }
+        }
+
+        $runTag = if ($IsRunning) { "" } else { "  $(Get-Message -Key 'Tag_ServerOff')" }
+
+        Show-Header
+        Write-Host ""
+        Write-Host "  $($Selected.Name)  --  $(Get-Message -Key 'Manage_NetworkFirewall')" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  1) $(Get-Message -Key 'NetMenu_Firewall')"
+        Write-Host "  2) $(Get-Message -Key 'NetMenu_Diagnostics')$runTag" -ForegroundColor $(if ($IsRunning) { "White" } else { "DarkGray" })
+        Write-Host "  3) $(Get-Message -Key 'NetMenu_StartAndTest')" -ForegroundColor $(if (-not $IsRunning) { "White" } else { "DarkGray" })
+        Write-Host ""
+        Write-Host "  0) $(Get-Message -Key 'Manage_Back')"
+        Write-Host ""
+
+        $netChoice = Read-Host (Get-Message -Key "Common_Select")
+        switch ($netChoice) {
+            "1" {
+                Invoke-FirewallManagement -ServerName $Selected.Name `
+                    -RootPath $RootPath -Language $config.Language -Port $fwPort
+            }
+            "2" {
+                Invoke-NetworkDiagnostics -Server $Selected -IsRunning $IsRunning
+            }
+            "3" {
+                if ($IsRunning) {
+                    Write-Host "`n  $(Get-Message -Key 'NetMenu_AlreadyRunning')`n" -ForegroundColor Yellow
+                    Read-Host (Get-Message -Key "Common_PressEnter") | Out-Null
+                } else {
+                    # Start server in normal mode (no monitoring window)
+                    $netGamePath = Get-GamePath $Selected
+                    $netMgrPath  = Get-ManagerPath $Selected
+                    $netCmd      = Build-ServerLaunchCommand `
+                        -InstallPath $netGamePath -ManagerPath $netMgrPath -Game $Selected.Game
+                    $netArgs     = if ($netCmd) { $netCmd.Arguments } else { "" }
+
+                    Write-Host ""
+                    Write-Host "  $(Get-Message -Key 'NetMenu_Starting')..." -ForegroundColor Cyan
+                    $netPID = Start-ServerNormal -InstallPath $netGamePath -ArgString $netArgs
+                    if ($netPID -is [int] -and $netPID -gt 0) {
+                        $netRf = Join-Path $netMgrPath ".running"
+                        @{
+                            ServerPath      = $Selected.Path
+                            ServerName      = $Selected.Name
+                            ServerProcessId = $netPID
+                            StartedAt       = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+                        } | ConvertTo-Json | Set-Content $netRf -Encoding UTF8
+
+                        # Poll until server responds to Source queries (max 60s)
+                        $netLocalIP = Get-PreferredLocalIP
+                        Write-Host "  $(Get-Message -Key 'NetMenu_WaitingStartup')" -NoNewline -ForegroundColor DarkGray
+                        $netReady = Wait-ServerReady -IP $netLocalIP -Port $fwPort -MaxSeconds 60
+                        if ($netReady) {
+                            Write-Host " [OK]" -ForegroundColor Green
+                        } else {
+                            Write-Host " $(Get-Message -Key 'NetMenu_StartupTimeout')" -ForegroundColor Yellow
+                        }
+                        Start-Sleep -Seconds 1
+                        Invoke-NetworkDiagnostics -Server $Selected -IsRunning $true
+                    } else {
+                        Write-Host "  $(Get-Message -Key 'Start_Failed')`n" -ForegroundColor Red
+                        Start-Sleep -Seconds 2
+                    }
+                }
+            }
+            "0" { return }
+        }
+    }
+}
+
 function Show-ServerStatusBox {
     param($server)
 
@@ -1300,19 +1379,43 @@ function Show-ServerStatusBox {
             $processFound = $false
 
             if ($runningData.PowerShellPID) {
-                $psProcess = Get-Process -Id $runningData.PowerShellPID -ErrorAction SilentlyContinue
-                if ($psProcess) { $processFound = $true }
+                $psProc = Get-Process -Id $runningData.PowerShellPID -ErrorAction SilentlyContinue
+                if ($psProc -and $psProc.ProcessName -match "powershell|pwsh") { $processFound = $true }
             }
 
             if (-not $processFound -and $runningData.ServerProcessId) {
-                $serverProcess = Get-Process -Id $runningData.ServerProcessId -ErrorAction SilentlyContinue
-                if ($serverProcess) { $processFound = $true }
+                $srvProc = Get-Process -Id $runningData.ServerProcessId -ErrorAction SilentlyContinue
+                # Verify the process name matches the expected game executable
+                $expectedExe = "srcds"
+                $chkMeta = Get-GameMetadata -Game $server.Game
+                if ($chkMeta -and $chkMeta.Executable) {
+                    $expectedExe = [System.IO.Path]::GetFileNameWithoutExtension($chkMeta.Executable)
+                }
+                if ($srvProc -and $srvProc.ProcessName -like "*$expectedExe*") { $processFound = $true }
             }
 
             if ($processFound) {
                 $isRunning = $true
+            } else {
+                # Stale .running file — remove it
+                Remove-Item $runningFile -Force -ErrorAction SilentlyContinue
+                Write-Log "Removed stale .running file for server: $($server.Name)" "INFO"
             }
         } catch { }
+    }
+
+    # Fallback: if no .running file or stale, check via A2S_INFO query
+    # Handles servers started outside the tool or after tool restart
+    if (-not $isRunning) {
+        $fbMeta = Get-GameMetadata -Game $server.Game
+        $fbCfg  = Get-ServerManagerConfig -ManagerPath $managerPath
+        $fbPort = [int](Resolve-ServerParam -ManagerConfig $fbCfg -Field "Port" `
+                    -MetadataDefault ($fbMeta.DefaultGamePort) -HardcodedDefault 27016)
+        $fbIP   = Get-PreferredLocalIP
+        if ($fbIP -and (Test-SourceQueryReachable -IP $fbIP -Port $fbPort -TimeoutMs 1000)) {
+            $isRunning = $true
+            Write-Log "Server $($server.Name) detected via A2S_INFO (no .running file)" "INFO"
+        }
     }
 
     # Installation Status
@@ -1341,13 +1444,48 @@ function Show-ServerStatusBox {
         $cfgSymbol = "[!!]"; $cfgColor = "Yellow"; $cfgText = "ServerInfo_NotConfigured"
     }
 
-    # Firewall Status
-    $fwPort = if ($server.FirewallPort) { [int]$server.FirewallPort } else { 27016 }
-    $rule = Get-ServerFirewallRule -ServerName $server.Name -Port $fwPort
-    if ($rule) {
-        $fwSymbol = "[OK]"; $fwColor = "Green"; $fwText = "ServerInfo_FirewallOpen"
+    # Windows Firewall state (via MpsSvc service)
+    $wfSvc = Get-Service -Name "MpsSvc" -ErrorAction SilentlyContinue
+    $wfEnabled = ($wfSvc -and $wfSvc.Status -eq "Running")
+    if ($wfEnabled) {
+        $wfSymbol = "[OK]"; $wfColor = "Green"
+        $wfLabel  = Get-Message -Key "ServerInfo_FWEnabled"
     } else {
-        $fwSymbol = "[CLOSED]"; $fwColor = "Red"; $fwText = "ServerInfo_FirewallClosed"
+        $wfSymbol = "[!!]"; $wfColor = "Yellow"
+        $wfLabel  = Get-Message -Key "ServerInfo_FWDisabled"
+    }
+
+    # Third-party firewall (SecurityCenter2)
+    $tpFwName   = $null
+    $tpFwActive = $false
+    try {
+        $fwProducts = @(Get-CimInstance -Namespace "root/SecurityCenter2" -ClassName "FirewallProduct" -ErrorAction SilentlyContinue)
+        foreach ($fp in $fwProducts) {
+            if ($fp.displayName -notmatch "Windows") {
+                $tpFwName = $fp.displayName
+                # productState hex: 3rd nibble from left (index 2) == '1' means enabled
+                $stateHex = "{0:X6}" -f [int]$fp.productState
+                $tpFwActive = ($stateHex.Length -ge 3 -and $stateHex[2] -eq '1')
+                break
+            }
+        }
+    } catch { }
+
+    if ($tpFwName) {
+        # Third-party present: Windows Firewall is irrelevant
+        $wfSymbol = "[--]"; $wfColor = "DarkGray"
+        $wfLabel  = Get-Message -Key "ServerInfo_FWIrrelevant"
+
+        $tpSymbol = "[OK]"; $tpColor = "Cyan"
+        $tpUnmanaged = Get-Message -Key "ServerInfo_FWThirdPartyUnmanaged"
+        if ($tpFwActive) {
+            $tpLabel = "$tpFwName  [$tpUnmanaged]"
+        } else {
+            $tpLabel = "$tpFwName  [$tpUnmanaged]"
+        }
+    } else {
+        $tpSymbol = ""; $tpColor = "DarkGray"
+        $tpLabel  = Get-Message -Key "ServerInfo_FWThirdPartyNone"
     }
 
     # Mod Status (disk-based)
@@ -1380,6 +1518,28 @@ function Show-ServerStatusBox {
         $runSymbol = "[--]"; $runColor = "Yellow"; $runText = "ServerInfo_NotRunning"
     }
 
+    # Session line: player count + connection type (from console.log + RCON)
+    $sessionLabel    = "-----"
+    $sessionColor    = "DarkGray"
+    $sessionPlayers  = $null
+    $sessionConnType = $null
+
+    # Read game metadata early (needed for console info + box display)
+    $boxMeta = Get-GameMetadata -Game $server.Game
+    $boxCfg  = Get-ServerManagerConfig -ManagerPath $managerPath
+    $boxMap  = Resolve-ServerParam -ManagerConfig $boxCfg -Field "Map"     -MetadataDefault ($boxMeta.DefaultMap)      -HardcodedDefault "?"
+    $boxMode = Resolve-ServerParam -ManagerConfig $boxCfg -Field "GameMode"-MetadataDefault ($boxMeta.DefaultGameMode) -HardcodedDefault "?"
+    $boxPort = Resolve-ServerParam -ManagerConfig $boxCfg -Field "Port"    -MetadataDefault ($boxMeta.DefaultGamePort) -HardcodedDefault 27016
+
+    # Console log info: connection type detection
+    if ($isRunning) {
+        $gameFolder = if ($boxMeta -and $boxMeta.GameFolder) { $boxMeta.GameFolder } else { "left4dead2" }
+        $consoleInfo = Get-ServerConsoleInfo -ServerPath $server.Path -GameFolder $gameFolder
+        if ($consoleInfo -and $consoleInfo.LastConnectionType) {
+            $sessionConnType = $consoleInfo.LastConnectionType
+        }
+    }
+
     # RCON Status
     $managerConfigPath = Join-Path $managerPath "config.json"
     $rconPasswordSet = $false
@@ -1396,14 +1556,12 @@ function Show-ServerStatusBox {
         $rconSymbol = "[OK]"; $rconColor = "Green"; $rconLabel = Get-Message -Key "ServerInfo_RconPasswordSet"
     }
 
-    $playersLabel = ""
-
     if ($rconPasswordSet -and $isRunning) {
         $statusResp = Invoke-ServerRcon -Server $server -Command "status"
         if ($null -ne $statusResp) {
             $rconLabel = Get-Message -Key "ServerInfo_RconActive"
             if ($statusResp -match 'players\s*:\s*(\d+)\s+humans.*?\((\d+)\s+max\)') {
-                $playersLabel = "  -  $(Get-Message -Key 'ServerInfo_Players' -MsgArgs @($Matches[1], $Matches[2]))"
+                $sessionPlayers = "$($Matches[1])/$($Matches[2])"
             }
 
             if ($mmInstalled) {
@@ -1429,6 +1587,27 @@ function Show-ServerStatusBox {
         }
     }
 
+    # Build session line now that we have player count from RCON
+    if ($isRunning) {
+        $playersPart = if ($sessionPlayers) { "$sessionPlayers  " } else { "?/?  " }
+        # Extract current player count to decide if session is active
+        $currentPlayers = 0
+        if ($sessionPlayers -and $sessionPlayers -match '^(\d+)/') {
+            $currentPlayers = [int]$Matches[1]
+        }
+        # Show connection type only if players are currently connected
+        if ($currentPlayers -gt 0 -and $sessionConnType -eq "matchmaking") {
+            $sessionLabel = "$playersPart$(Get-Message -Key 'ServerInfo_ConnMatchmaking')"
+            $sessionColor = "Green"
+        } elseif ($currentPlayers -gt 0 -and $sessionConnType -eq "direct") {
+            $sessionLabel = "$playersPart$(Get-Message -Key 'ServerInfo_ConnDirect')"
+            $sessionColor = "Yellow"
+        } else {
+            $sessionLabel = "$playersPart$(Get-Message -Key 'ServerInfo_ConnAvailable')"
+            $sessionColor = "White"
+        }
+    }
+
     [Console]::SetCursorPosition(0, $loadingRow)
     Write-Host (" " * ([Console]::WindowWidth - 1)) -NoNewline
     [Console]::SetCursorPosition(0, $loadingRow)
@@ -1440,15 +1619,19 @@ function Show-ServerStatusBox {
     # Collect label strings for alignment
     $lInstall  = Get-Message -Key "ServerInfo_Installation"
     $lConfig   = Get-Message -Key "ServerInfo_Configuration"
+    $lPort     = Get-Message -Key "ServerInfo_Port"
+    $lWinFW    = Get-Message -Key "ServerInfo_WinFirewall"
+    $lThirdFW  = Get-Message -Key "ServerInfo_ThirdPartyFW"
+    $lLanIP    = Get-Message -Key "ServerInfo_LanIP"
+    $lPubIP    = Get-Message -Key "ServerInfo_PublicIP"
     $lMap      = Get-Message -Key "ServerInfo_Map"
     $lMode     = Get-Message -Key "ServerInfo_GameMode"
-    $lPort     = Get-Message -Key "ServerInfo_Port"
     $lMeta     = Get-Message -Key "ServerInfo_MetaMod"
     $lSource   = Get-Message -Key "ServerInfo_SourceMod"
     $lStatus   = Get-Message -Key "ServerInfo_Status"
     $lRcon     = Get-Message -Key "ServerInfo_Rcon"
 
-    $colW = (@($lInstall,$lConfig,$lMap,$lMode,$lPort,$lMeta,$lSource,$lStatus,$lRcon) |
+    $colW = (@($lInstall,$lConfig,$lPort,$lWinFW,$lThirdFW,$lLanIP,$lPubIP,$lMap,$lMode,$lMeta,$lSource,$lStatus,$lRcon) |
              Measure-Object -Maximum -Property Length).Maximum + 1
 
     function Write-InfoLine {
@@ -1463,25 +1646,30 @@ function Show-ServerStatusBox {
         Write-Host $Value -ForegroundColor $Color
     }
 
-    # Read Map/GameMode/Port from manager config (authoritative source)
-    $boxMeta = Get-GameMetadata -Game $server.Game
-    $boxCfg  = Get-ServerManagerConfig -ManagerPath $managerPath
-    $boxMap  = Resolve-ServerParam -ManagerConfig $boxCfg -Field "Map"     -MetadataDefault ($boxMeta.DefaultMap)      -HardcodedDefault "?"
-    $boxMode = Resolve-ServerParam -ManagerConfig $boxCfg -Field "GameMode"-MetadataDefault ($boxMeta.DefaultGameMode) -HardcodedDefault "?"
-    $boxPort = Resolve-ServerParam -ManagerConfig $boxCfg -Field "Port"    -MetadataDefault ($boxMeta.DefaultGamePort) -HardcodedDefault 27016
+    # Get local IP (primary adapter) and cached public IP
+    $boxLocalIP  = Get-PreferredLocalIP
+    $boxPublicIP = Get-CachedPublicIP
+    $boxLanAddr  = if ($boxLocalIP)  { "$boxLocalIP`:$boxPort" }  else { "?:$boxPort" }
+    $boxPubAddr  = if ($boxPublicIP) { "$boxPublicIP`:$boxPort" } else { Get-Message -Key "ServerInfo_PublicIPUnknown" }
 
     Write-Host ""
     Write-Host $divider -ForegroundColor DarkGray
     Write-InfoLine $lInstall "$instSymbol $(Get-Message -Key $instText)" $instColor
     Write-InfoLine $lConfig  "$cfgSymbol $(Get-Message -Key $cfgText)"   $cfgColor
+    Write-InfoLine $lPort    $boxPort
+    Write-InfoLine $lWinFW   "$wfSymbol $wfLabel" $wfColor
+    $tpLine = "$tpSymbol $tpLabel".Trim()
+    Write-InfoLine $lThirdFW $tpLine $tpColor
+    Write-InfoLine $lLanIP   $boxLanAddr
+    $pubIPColor = if ($boxPublicIP) { "White" } else { "DarkGray" }
+    Write-InfoLine $lPubIP   $boxPubAddr  $pubIPColor
     Write-InfoLine $lMap     $boxMap
     Write-InfoLine $lMode    $boxMode
-    Write-InfoLine $lPort    "$boxPort  $fwSymbol $(Get-Message -Key $fwText)" $fwColor
-    Write-Host "  $(' ' * ($colW + 3))$(Get-Message -Key 'ServerInfo_FirewallThirdParty')" -ForegroundColor Yellow
-    Write-InfoLine $lMeta   "$mmSymbol $mmLabel" $mmColor
-    Write-InfoLine $lSource "$smSymbol $smLabel" $smColor
-    Write-InfoLine $lStatus "$runSymbol $(Get-Message -Key $runText)" $runColor
-    Write-InfoLine $lRcon   "$rconSymbol $rconLabel$playersLabel" $rconColor
+    Write-InfoLine $lMeta    "$mmSymbol $mmLabel" $mmColor
+    Write-InfoLine $lSource  "$smSymbol $smLabel" $smColor
+    Write-InfoLine $lStatus  "$runSymbol $(Get-Message -Key $runText)" $runColor
+    Write-InfoLine (Get-Message -Key "ServerInfo_Session") $sessionLabel $sessionColor
+    Write-InfoLine $lRcon    "$rconSymbol $rconLabel" $rconColor
     Write-Host $divider -ForegroundColor DarkGray
     Write-Host ""
 }
@@ -1737,6 +1925,20 @@ function Invoke-ManageServer {
             }
         }
 
+        # A2S_INFO fallback: detect server started outside the tool
+        if (-not $isRunning) {
+            $fbMeta2 = Get-GameMetadata -Game $selected.Game
+            $fbCfg2  = Get-ServerManagerConfig -ManagerPath $managerPath
+            $fbPort2 = [int](Resolve-ServerParam -ManagerConfig $fbCfg2 -Field "Port" `
+                        -MetadataDefault ($fbMeta2.DefaultGamePort) -HardcodedDefault 27016)
+            $fbIP2   = Get-PreferredLocalIP
+            if ($fbIP2 -and (Test-SourceQueryReachable -IP $fbIP2 -Port $fbPort2 -TimeoutMs 1000)) {
+                $isRunning = $true
+            }
+        }
+        # Server is "not started this session" if running but not launched by current tool instance
+        $isExternalStart = $isRunning -and ($script:_StartedThisSession -notcontains $selected.ServerId)
+
         $isInstalling  = ($selected.Status -eq "Installing") -or ($selected.Status -eq "Error")
         $isDownloading = ($selected.Status -eq "Installing") -and (Test-Path $installingFile)
         $tagND = Get-Message -Key "Tag_ND"
@@ -1753,6 +1955,9 @@ function Invoke-ManageServer {
         } elseif ($isRunning) {
             Write-Host "  1) $(Get-Message -Key 'Manage_Stop')"  -ForegroundColor Yellow
             Write-Host "  2) $(Get-Message -Key 'Manage_Restart')" -ForegroundColor Yellow
+            if ($isExternalStart) {
+                Write-Host "     $(Get-Message -Key 'Manage_ExternalStartWarning')" -ForegroundColor DarkYellow
+            }
         } else {
             Write-Host "  1) $(Get-Message -Key 'Manage_Start')"
             Write-Host "  2) $(Get-Message -Key 'Manage_Restart')" -ForegroundColor DarkGray
@@ -1768,14 +1973,14 @@ function Invoke-ManageServer {
         Write-Host "  --- $(Get-Message -Key 'Manage_Section_Configuration') ---" -ForegroundColor DarkGray
         if ($isInstalling) {
             Write-Host "  3) $(Get-Message -Key 'Manage_ChangeSettings')  $tagND" -ForegroundColor DarkGray
-            Write-Host "  4) $(Get-Message -Key 'Manage_Firewall')  $tagND" -ForegroundColor DarkGray
+            Write-Host "  4) $(Get-Message -Key 'Manage_NetworkFirewall')  $tagND" -ForegroundColor DarkGray
             Write-Host "  5) $(Get-Message -Key 'Manage_Mods')  $tagND" -ForegroundColor DarkGray
             Write-Host "  6) $(Get-Message -Key 'Manage_Admins')  $tagND" -ForegroundColor DarkGray
             Write-Host "  7) $(Get-Message -Key 'Manage_ServerSettings')  $tagND" -ForegroundColor DarkGray
             Write-Host "  8) $(Get-Message -Key 'Manage_Plugins')  $tagND" -ForegroundColor DarkGray
         } else {
             Write-Host "  3) $(Get-Message -Key 'Manage_ChangeSettings')"
-            Write-Host "  4) $(Get-Message -Key 'Manage_Firewall')  $(Get-Message -Key 'Tag_WIP')" -ForegroundColor Yellow
+            Write-Host "  4) $(Get-Message -Key 'Manage_NetworkFirewall')"
             Write-Host "  5) $(Get-Message -Key 'Manage_Mods')"
             Write-Host "  6) $(Get-Message -Key 'Manage_Admins')"
             Write-Host "  7) $(Get-Message -Key 'Manage_ServerSettings')"
@@ -1842,8 +2047,20 @@ function Invoke-ManageServer {
                 Read-Host (Get-Message -Key "Common_PressEnter")
             }
             "4" {
-                $fwPort = if ($selected.FirewallPort) { [int]$selected.FirewallPort } else { 27016 }
-                Invoke-FirewallManagement -ServerName $selected.Name -RootPath $RootPath -Language $config.Language -Port $fwPort
+                $netRunFile = Join-Path (Get-ManagerPath $selected) ".running"
+                $netRunning = $false
+                if (Test-Path $netRunFile) {
+                    try {
+                        $netRd = Get-Content $netRunFile -Raw | ConvertFrom-Json
+                        if ($netRd.ServerProcessId) {
+                            $netRunning = $null -ne (Get-Process -Id $netRd.ServerProcessId -ErrorAction SilentlyContinue)
+                        }
+                        if (-not $netRunning -and $netRd.PowerShellPID) {
+                            $netRunning = $null -ne (Get-Process -Id $netRd.PowerShellPID -ErrorAction SilentlyContinue)
+                        }
+                    } catch {}
+                }
+                Invoke-NetworkMenu -Selected $selected -IsRunning $netRunning
             }
             "5" {
                 Show-ModMenu -Server $selected -RootPath $RootPath
@@ -2116,6 +2333,7 @@ function Invoke-RestartServer {
                 ServerProcessId = $newPid
                 StartedAt       = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
             } | ConvertTo-Json | Set-Content $runningFile -Encoding UTF8
+            $script:_StartedThisSession = @($script:_StartedThisSession) + $server.ServerId
             Write-Host "`n$(Get-Message -Key 'Mod_RestartDone')`n" -ForegroundColor Green
         } else {
             Write-Host "`n$(Get-Message -Key 'Mod_RestartFailed')`n" -ForegroundColor Red
@@ -2135,6 +2353,7 @@ Start-ServerWithMonitoring -InstallPath '$gamePath' -ManagerPath '$managerPath' 
             PowerShellPID = $process.Id
             StartedAt     = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
         } | ConvertTo-Json | Set-Content $runningFile -Encoding UTF8
+        $script:_StartedThisSession = @($script:_StartedThisSession) + $server.ServerId
         Write-Host "`n$(Get-Message -Key 'Mod_RestartDone')`n" -ForegroundColor Green
     }
 
