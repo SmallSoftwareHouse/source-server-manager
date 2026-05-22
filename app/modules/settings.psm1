@@ -368,7 +368,7 @@ function Invoke-Settings {
                     } else {
                         Write-Host "`n$(Get-Message -Key 'Settings_ServerRootUnchanged')`n" -ForegroundColor DarkGray
                     }
-                    Start-Sleep -Seconds 2
+                    Read-Host (Get-Message -Key "Common_PressEnter") | Out-Null
                 }
             }
             "3" {
