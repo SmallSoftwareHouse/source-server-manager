@@ -158,9 +158,18 @@ function Show-SettingsSummary {
     } catch { }
     if ([string]::IsNullOrWhiteSpace($langDisplay)) { $langDisplay = $config.Language }
 
+    # Truncate path from the left if it would overflow the console width
+    $folderLabel   = "$(Get-Message -Key 'Home_DefaultFolder') : "
+    $suffixText    = if ($freeGB -ge 0) { $spaceSuffix } else { "" }
+    $availableWidth = [Console]::WindowWidth - $folderLabel.Length - $suffixText.Length - 2
+    $displayRoot   = $shortRoot
+    if ($displayRoot.Length -gt $availableWidth -and $availableWidth -gt 5) {
+        $displayRoot = "..." + $displayRoot.Substring($displayRoot.Length - ($availableWidth - 3))
+    }
+
     Write-Host (Get-Message -Key "Home_SettingsLabel")
-    Write-Host "$(Get-Message -Key 'Home_DefaultFolder') : " -NoNewline -ForegroundColor DarkGray
-    Write-Host "$shortRoot" -NoNewline -ForegroundColor White
+    Write-Host $folderLabel -NoNewline -ForegroundColor DarkGray
+    Write-Host $displayRoot -NoNewline -ForegroundColor White
     if ($freeGB -ge 0) {
         Write-Host $spaceSuffix -ForegroundColor $spaceColor
     } else {
