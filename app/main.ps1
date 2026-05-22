@@ -1,6 +1,20 @@
 ﻿$RootPath = $PSScriptRoot
 Set-Location $RootPath
 
+# --- SESSION TRANSCRIPT ---
+$_transcriptDir = Join-Path $RootPath "logs\transcripts"
+if (-not (Test-Path $_transcriptDir)) {
+    New-Item -ItemType Directory -Path $_transcriptDir -Force | Out-Null
+}
+$_transcriptFile = Join-Path $_transcriptDir ("session_" + (Get-Date -Format "yyyyMMdd_HHmmss") + ".log")
+Start-Transcript -Path $_transcriptFile -NoClobber | Out-Null
+
+# Keep only the 10 most recent transcript files
+$_transcripts = @(Get-ChildItem -Path $_transcriptDir -Filter "session_*.log" | Sort-Object Name -Descending)
+if ($_transcripts.Count -gt 10) {
+    $_transcripts | Select-Object -Skip 10 | ForEach-Object { Remove-Item $_.FullName -Force }
+}
+
 # Single-instance lock via named mutex
 $_mutexName = "Global\SourceServerManager_SingleInstance"
 $_mutex = New-Object System.Threading.Mutex($false, $_mutexName)
@@ -362,7 +376,7 @@ while ($true) {
         }
         "5" { Invoke-RecoverServer }
         "6" { Invoke-Settings -Config $config -RootPath $RootPath }
-        "7" { Write-Log "Manager chiuso" "INFO"; exit }
+        "7" { Write-Log "Manager chiuso" "INFO"; Stop-Transcript | Out-Null; exit }
         default {
             Write-Host "`n$(Get-Message -Key 'Common_InvalidOption')`n" -ForegroundColor Yellow
             Start-Sleep -Seconds 1
