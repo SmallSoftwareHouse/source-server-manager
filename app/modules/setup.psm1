@@ -143,12 +143,7 @@ function Invoke-CreateServer {
         return
     }
 
-    Write-Host ""
-    Write-Host "  $(Get-Message -Key 'Create_ChooseFolder')" -ForegroundColor Cyan
-    Write-Host ""
-    Read-Host (Get-Message -Key "Common_PressEnter") | Out-Null
-
-    $chosenBase = Select-FolderInteractive
+    $chosenBase = Select-FolderInteractive -DefaultInstallRoot $Config.DefaultInstallRoot
     if ($null -eq $chosenBase) { return }
 
     $finalPath = Join-Path $chosenBase $serverName

@@ -76,6 +76,7 @@
   "Setup_ServerFolderTip3": "  Es: C:\\GameServers   D:\\L4D2Servers   E:\\Dedicated",
 
   "Browse_SelectDrive": "Seleziona un disco",
+  "Browse_DefaultFolder": "Cartella di default del tool (consigliata)",
   "Browse_Cancel": "Annulla",
   "Browse_InsufficientSpace": "Spazio insufficiente (< 10 GB). Scegli un'altra posizione.",
   "Browse_CurrentPath": "Posizione corrente",

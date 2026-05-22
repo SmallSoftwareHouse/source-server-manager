@@ -94,6 +94,8 @@ function Test-IsSystemFolder {
 }
 
 function Select-FolderInteractive {
+    param([string]$DefaultInstallRoot = "")
+
     $allDrives = @(Get-WmiObject Win32_LogicalDisk -ErrorAction SilentlyContinue |
         Where-Object { $_.DriveType -eq 3 -and $_.FileSystem -eq 'NTFS' } |
         Sort-Object DeviceID)
@@ -110,6 +112,21 @@ function Select-FolderInteractive {
         Write-Host ""
 
         if ($currentPath -eq "") {
+            # Show default folder shortcut if provided
+            $hasDefault = (-not [string]::IsNullOrEmpty($DefaultInstallRoot)) -and (Test-Path $DefaultInstallRoot)
+            if ($hasDefault) {
+                $defDrive = $DefaultInstallRoot.Substring(0,2) + '\'
+                $defDrv   = $allDrives | Where-Object { $_.DeviceID -eq $DefaultInstallRoot.Substring(0,2) } | Select-Object -First 1
+                $defFreeGB = if ($defDrv) { [math]::Round($defDrv.FreeSpace / 1GB, 1) } else { -1 }
+                $defSuffix = Get-SpaceSuffix -GB $defFreeGB
+                $defColor  = Get-SpaceColor  -GB $defFreeGB
+                Write-Host "  INVIO) " -NoNewline -ForegroundColor Green
+                Write-Host "$DefaultInstallRoot " -NoNewline -ForegroundColor White
+                Write-Host "$(Get-Message -Key 'Browse_DefaultFolder')" -NoNewline -ForegroundColor Green
+                Write-Host $defSuffix -ForegroundColor $defColor
+                Write-Host ""
+            }
+
             Write-Host "  --- $(Get-Message -Key 'Browse_SelectDrive') ---" -ForegroundColor Yellow
             Write-Host ""
 
@@ -119,14 +136,16 @@ function Select-FolderInteractive {
                 $freeGB = [math]::Round($drv.FreeSpace / 1GB, 1)
                 $isSystem = ($letter -eq $sysDrive)
                 if ($isSystem) {
+                    $label  = "  $idx) $letter\"
                     $suffix = "  [$(Get-Message -Key 'Browse_SystemDrive')  ${freeGB}GB]"
-                    $color  = "Yellow"
+                    Write-Host $label -NoNewline -ForegroundColor White
+                    Write-Host $suffix -ForegroundColor Yellow
                 } else {
                     $suffix = Get-SpaceSuffix -GB $freeGB
                     $color  = Get-SpaceColor -GB $freeGB
+                    Write-Host "  $idx) $letter\" -NoNewline -ForegroundColor White
+                    Write-Host $suffix -ForegroundColor $color
                 }
-                Write-Host "  $idx) $letter\" -NoNewline -ForegroundColor White
-                Write-Host $suffix -ForegroundColor $color
                 $idx++
             }
             Write-Host ""
@@ -134,6 +153,11 @@ function Select-FolderInteractive {
             Write-Host ""
 
             $choice = (Read-Host "  >").Trim()
+
+            # ENTER = default folder
+            if ($choice -eq "" -and $hasDefault) {
+                return $DefaultInstallRoot.TrimEnd('\')
+            }
             if ($choice -eq "0") { return $null }
             if ($choice -match '^\d+$') {
                 $ci = [int]$choice - 1
