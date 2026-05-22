@@ -67,6 +67,7 @@
   "Settings_ResetConfirm": "Questa operazione azzera lingua e cartella server. Al prossimo avvio verranno richieste di nuovo.",
   "Settings_ResetDone": "Configurazione azzerata. Riavvia il tool.",
   "Setup_ServerFolderTitle": "Configurazione iniziale - Cartella server",
+  "Settings_ServerFolderTitle": "Modifica cartella server di default",
   "Setup_ServerFolderDesc": "Scegli dove verranno installati i server dedicati sul tuo PC.",
   "Setup_ServerFolderPrompt": "Percorso cartella server",
   "Setup_ServerFolderAbsolute": "Inserisci un percorso assoluto (es. C:\\GameServers).",

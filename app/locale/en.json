@@ -67,6 +67,7 @@
   "Settings_ResetConfirm": "This will reset language and server folder. They will be asked again on next startup.",
   "Settings_ResetDone": "Configuration reset. Restart the tool.",
   "Setup_ServerFolderTitle": "Initial setup - Server folder",
+  "Settings_ServerFolderTitle": "Change default server folder",
   "Setup_ServerFolderDesc": "Choose where dedicated servers will be installed on your PC.",
   "Setup_ServerFolderPrompt": "Server folder path",
   "Setup_ServerFolderAbsolute": "Please enter an absolute path (e.g. C:\\GameServers).",

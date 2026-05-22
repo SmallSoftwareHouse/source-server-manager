@@ -94,7 +94,10 @@ function Test-IsSystemFolder {
 }
 
 function Select-FolderInteractive {
-    param([string]$DefaultInstallRoot = "")
+    param(
+        [string]$DefaultInstallRoot = "",
+        [string]$Title = ""
+    )
 
     $allDrives = @(Get-WmiObject Win32_LogicalDisk -ErrorAction SilentlyContinue |
         Where-Object { $_.DriveType -eq 3 -and $_.FileSystem -eq 'NTFS' } |
@@ -107,7 +110,8 @@ function Select-FolderInteractive {
     while ($true) {
         Clear-Host
         Write-Host "=====================================" -ForegroundColor Cyan
-        Write-Host "  $(Get-Message -Key 'Setup_ServerFolderTitle')" -ForegroundColor White
+        $displayTitle = if ([string]::IsNullOrEmpty($Title)) { Get-Message -Key "Setup_ServerFolderTitle" } else { $Title }
+        Write-Host "  $displayTitle" -ForegroundColor White
         Write-Host "=====================================" -ForegroundColor Cyan
         Write-Host ""
 
@@ -353,13 +357,13 @@ function Invoke-Settings {
                 }
             }
             "2" {
-                $newRoot = Ask-DefaultInstallRoot -AllowCancel
+                $newRoot = Select-FolderInteractive -DefaultInstallRoot $Config.DefaultInstallRoot -Title (Get-Message -Key "Settings_ServerFolderTitle")
                 if ($null -ne $newRoot) {
                     Save-DefaultInstallRoot -ConfigPath "$RootPath\config\default_config.json" -Path $newRoot
                     $Config.DefaultInstallRoot = $newRoot
                     Write-Host "`n$(Get-Message -Key 'Settings_ServerRootChanged')`n" -ForegroundColor Green
+                    Start-Sleep -Seconds 2
                 }
-                Start-Sleep -Seconds 2
             }
             "3" {
                 Write-Host "`n$(Get-Message -Key 'Settings_ResetConfirm')" -ForegroundColor Yellow
