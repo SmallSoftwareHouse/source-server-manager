@@ -3,6 +3,21 @@ $script:_PubIPCache    = $null
 $script:_PubIPCacheAge = $null
 $script:_StartedThisSession = @()
 
+function Get-FolderSize {
+    # Returns a human-readable folder size string (e.g. "1.2 GB", "345 MB")
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return "0 B" }
+    try {
+        $bytes = (Get-ChildItem -Path $Path -Recurse -Force -ErrorAction SilentlyContinue |
+                  Measure-Object -Property Length -Sum -ErrorAction SilentlyContinue).Sum
+        if (-not $bytes) { $bytes = 0 }
+        if     ($bytes -ge 1GB) { return ("{0:N1} GB" -f ($bytes / 1GB)) }
+        elseif ($bytes -ge 1MB) { return ("{0:N0} MB" -f ($bytes / 1MB)) }
+        elseif ($bytes -ge 1KB) { return ("{0:N0} KB" -f ($bytes / 1KB)) }
+        else                    { return "$bytes B" }
+    } catch { return "?" }
+}
+
 function Get-ShortPath {
     param([string]$Path, [string]$RootPath)
     $prefix = $RootPath + "\"
@@ -1295,15 +1310,38 @@ function Invoke-ManageServer {
             }
             "13" {
                 Write-Host "`n$(Get-Message -Key 'Delete_Warning' -MsgArgs @($selected.Name))" -ForegroundColor Yellow
-                Write-Host "$(Get-Message -Key 'Delete_DiskNote')`n"
-                $confirm = Read-Host (Get-Message -Key "Common_ConfirmPrompt")
-                if ($confirm -eq (Get-Message -Key "ConfirmYes")) {
-                    Remove-ServerFromRegistry -ServerId $selected.ServerId
-                    Write-Log "Server eliminato dal registry: $($selected.Name)" "INFO"
-                    Write-Host "`n$(Get-Message -Key 'Delete_Done')`n" -ForegroundColor Green
-                    Read-Host (Get-Message -Key "Common_PressEnter")
-                    return
+                $serverPath = $selected.Path
+                $diskExists = Test-Path $serverPath
+                if ($diskExists) {
+                    $folderSize = Get-FolderSize -Path $serverPath
+                    Write-Host (Get-Message -Key "Delete_DiskSize" -MsgArgs @($folderSize)) -ForegroundColor DarkGray
                 }
+                Write-Host ""
+                $askDisk = Read-Host (Get-Message -Key "Delete_AskDisk")
+                $deleteDisk = ($diskExists -and ($askDisk -eq (Get-Message -Key "ConfirmYes")))
+                if ($deleteDisk) {
+                    $nameCheck = Read-Host (Get-Message -Key "Delete_DiskConfirm")
+                    if ($nameCheck -ne $selected.Name) {
+                        Write-Host "`n$(Get-Message -Key 'Delete_DiskMismatch')`n" -ForegroundColor Yellow
+                        Read-Host (Get-Message -Key "Common_PressEnter") | Out-Null
+                        break
+                    }
+                    Remove-ServerFromRegistry -ServerId $selected.ServerId
+                    try {
+                        Remove-Item -Path $serverPath -Recurse -Force -ErrorAction Stop
+                        Write-Log "Server eliminato (registry + disco): $($selected.Name) [$serverPath]" "INFO"
+                        Write-Host "`n$(Get-Message -Key 'Delete_Done')`n" -ForegroundColor Green
+                    } catch {
+                        Write-Log "Errore eliminazione disco: $($selected.Name) - $_" "ERROR"
+                        Write-Host "`n$(Get-Message -Key 'Delete_DiskError' -MsgArgs @($_))`n" -ForegroundColor Red
+                    }
+                } else {
+                    Remove-ServerFromRegistry -ServerId $selected.ServerId
+                    Write-Log "Server rimosso dal registry: $($selected.Name)" "INFO"
+                    Write-Host "`n$(Get-Message -Key 'Delete_RegistryOnly')`n" -ForegroundColor Green
+                }
+                Read-Host (Get-Message -Key "Common_PressEnter") | Out-Null
+                return
             }
             "W" {
                 $selected = Invoke-SetupWizard -Server $selected -RootPath $RootPath
@@ -1672,4 +1710,105 @@ function Invoke-ServerSettings {
     }
 }
 
-Export-ModuleMember -Function Get-ShortPath, Find-UnregisteredServers, Register-UnregisteredServers, Invoke-ListServers, Invoke-RenameServer, Invoke-MoveServer, Invoke-StartServer, Stop-ServerMonitoring, Get-CachedPublicIP, Invoke-NetworkMenu, Show-ServerStatusBox, Show-PlayersMenu, Invoke-ManageServer, Invoke-RestartServer, Invoke-ServerSettings
+function Invoke-DeleteServers {
+    # Multi-select delete from main menu
+    param([string]$RootPath)
+
+    $servers = @(Get-ServerRegistry)
+    if ($servers.Count -eq 0) {
+        Write-Host "`n$(Get-Message -Key 'Common_NoServersRegistered')`n" -ForegroundColor DarkGray
+        Read-Host (Get-Message -Key "Common_PressEnter") | Out-Null
+        return
+    }
+
+    Write-Host ""
+    Write-Host (Get-Message -Key "Delete_Multi_Title") -ForegroundColor Cyan
+    Write-Host ""
+
+    for ($i = 0; $i -lt $servers.Count; $i++) {
+        $s = $servers[$i]
+        $disk = Get-ServerDiskStatus -Path (Get-GamePath $s)
+        if ($disk -eq "Installed" -and $s.Status -eq "Installed") {
+            $sym = "[OK]"; $col = "Green"
+        } elseif ($s.Status -eq "Installing") {
+            $sym = "[!!]"; $col = "Yellow"
+        } else {
+            $sym = "[--]"; $col = "Red"
+        }
+        $num  = "$($i+1)".PadLeft(3)
+        $name = $s.Name.PadRight(16)
+        Write-Host "$num) " -NoNewline -ForegroundColor DarkGray
+        Write-Host "$sym  $name" -NoNewline -ForegroundColor $col
+        Write-Host "  $($s.Path)" -ForegroundColor DarkGray
+    }
+
+    Write-Host ""
+    $raw = Read-Host (Get-Message -Key "Delete_Multi_Prompt")
+    if ($raw -eq "0" -or [string]::IsNullOrWhiteSpace($raw)) { return }
+
+    # Parse comma-separated numbers
+    $selected = @()
+    foreach ($token in ($raw -split ',')) {
+        $token = $token.Trim()
+        $n = 0
+        if ([int]::TryParse($token, [ref]$n) -and $n -ge 1 -and $n -le $servers.Count) {
+            $existing = $selected | Where-Object { $_.ServerId -eq $servers[$n-1].ServerId }
+            if (-not $existing) { $selected += $servers[$n-1] }
+        }
+    }
+
+    if ($selected.Count -eq 0) {
+        Write-Host "`n$(Get-Message -Key 'Common_InvalidSelection')`n" -ForegroundColor Yellow
+        Read-Host (Get-Message -Key "Common_PressEnter") | Out-Null
+        return
+    }
+
+    Write-Host ""
+    Write-Host (Get-Message -Key "Delete_Multi_Summary" -MsgArgs @($selected.Count)) -ForegroundColor Yellow
+    foreach ($s in $selected) {
+        Write-Host "  - $($s.Name)" -ForegroundColor Yellow
+    }
+    Write-Host ""
+
+    $askDisk = Read-Host (Get-Message -Key "Delete_Multi_AskDisk")
+    $deleteDisk = ($askDisk -eq (Get-Message -Key "ConfirmYes"))
+
+    if ($deleteDisk) {
+        Write-Host ""
+        # Show sizes
+        foreach ($s in $selected) {
+            if (Test-Path $s.Path) {
+                $sz = Get-FolderSize -Path $s.Path
+                Write-Host "  $($s.Name): $sz" -ForegroundColor DarkGray
+            } else {
+                Write-Host "  $($s.Name): (cartella non trovata)" -ForegroundColor DarkGray
+            }
+        }
+        Write-Host ""
+    }
+
+    $confirm = Read-Host (Get-Message -Key "Delete_Multi_Confirm")
+    if ($confirm -ne (Get-Message -Key "ConfirmYes")) { return }
+
+    $count = 0
+    foreach ($s in $selected) {
+        Remove-ServerFromRegistry -ServerId $s.ServerId
+        if ($deleteDisk -and (Test-Path $s.Path)) {
+            try {
+                Remove-Item -Path $s.Path -Recurse -Force -ErrorAction Stop
+                Write-Log "Server eliminato (registry + disco): $($s.Name) [$($s.Path)]" "INFO"
+            } catch {
+                Write-Log "Errore eliminazione disco: $($s.Name) - $_" "ERROR"
+                Write-Host "$(Get-Message -Key 'Delete_DiskError' -MsgArgs @($_))" -ForegroundColor Red
+            }
+        } else {
+            Write-Log "Server rimosso dal registry: $($s.Name)" "INFO"
+        }
+        $count++
+    }
+
+    Write-Host "`n$(Get-Message -Key 'Delete_Multi_Done' -MsgArgs @($count))`n" -ForegroundColor Green
+    Read-Host (Get-Message -Key "Common_PressEnter") | Out-Null
+}
+
+Export-ModuleMember -Function Get-FolderSize, Get-ShortPath, Find-UnregisteredServers, Register-UnregisteredServers, Invoke-ListServers, Invoke-RenameServer, Invoke-MoveServer, Invoke-StartServer, Stop-ServerMonitoring, Get-CachedPublicIP, Invoke-NetworkMenu, Show-ServerStatusBox, Show-PlayersMenu, Invoke-ManageServer, Invoke-RestartServer, Invoke-ServerSettings, Invoke-DeleteServers

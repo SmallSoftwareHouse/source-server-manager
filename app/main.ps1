@@ -265,6 +265,11 @@ function Show-Menu {
         Write-Host "  4) $(Get-Message -Key 'Menu_ResumeInstall')" -ForegroundColor DarkGray
     }
     Write-Host "  5) $(Get-Message -Key 'Menu_RecoverServer')"
+    if ($HasServers) {
+        Write-Host "  8) $(Get-Message -Key 'Menu_DeleteServers')" -ForegroundColor Red
+    } else {
+        Write-Host "  8) $(Get-Message -Key 'Menu_DeleteServers')" -ForegroundColor DarkGray
+    }
     Write-Host "  6) $(Get-Message -Key 'Menu_Settings')"
     Write-Host "  7) $(Get-Message -Key 'Menu_Exit')"
     Write-Host ""
@@ -389,6 +394,13 @@ while ($true) {
             }
         }
         "5" { Invoke-RecoverServer }
+        "8" {
+            if ($hasServers) { Invoke-DeleteServers -RootPath $RootPath }
+            else {
+                Write-Host "`n$(Get-Message -Key 'Common_NoServersRegistered')`n" -ForegroundColor DarkGray
+                Start-Sleep -Seconds 1
+            }
+        }
         "6" { Invoke-Settings -Config $config -RootPath $RootPath }
         "7" { Write-Log "Manager chiuso" "INFO"; Stop-Transcript | Out-Null; exit }
         default {
