@@ -154,7 +154,7 @@
   "Manage_Start": "Start server",
   "Manage_Stop": "Stop server",
   "Manage_Firewall": "Manage Firewall",
-  "Manage_NetworkFirewall": "Network and Firewall",
+  "Manage_NetworkFirewall": "Network and Firewall  [In development]",
   "NetMenu_Firewall": "Manage firewall",
   "NetMenu_Diagnostics": "Network diagnostics",
   "NetMenu_StartAndTest": "Start server and run full diagnostics",
